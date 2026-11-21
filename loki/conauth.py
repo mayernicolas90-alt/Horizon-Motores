@@ -1,11 +1,14 @@
-"""Lanzador de Loki en la PC: agrega el token de Turso (Administrador de credenciales) a los pedidos
-a turso.io y corre los subprocesos de Python en UTF-8. Uso: python -I -X utf8 conauth.py SCRIPT args..."""
+"""Lanzador de Loki (PC o nube): agrega el token de Turso a los pedidos
+a turso.io y corre los subprocesos de Python en UTF-8. Uso: python -I -X utf8 conauth.py SCRIPT args...
+Token: variable LOKI_TURSO_TOKEN (nube: secreto del entorno) o, en Windows, el Administrador de credenciales."""
 import os, sys, runpy, subprocess, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import credencial
-_tok = os.environ.get('LOKI_TURSO_TOKEN') or credencial.leer()
+_tok = os.environ.get('LOKI_TURSO_TOKEN')
+if not _tok and os.name == 'nt':
+    import credencial   # solo Windows
+    _tok = credencial.leer()
 if not _tok:
-    sys.exit('FALLA sin token de Turso en el Administrador de credenciales (Loki/Turso horizon-nicom90)')
+    sys.exit('FALLA sin token de Turso: variable LOKI_TURSO_TOKEN (nube) o Administrador de credenciales (PC)')
 _orig = urllib.request.urlopen
 def _open(rq, *a, **k):
     if isinstance(rq, urllib.request.Request) and 'turso.io' in rq.full_url and not rq.has_header('Authorization'):

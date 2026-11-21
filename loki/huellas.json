@@ -58,8 +58,8 @@
   },
   "conauth.py": {
    "origen": "loki-pc/conauth.py",
-   "huella": "1a0b93ff843f",
-   "version": "1.0",
+   "huella": "f9e0620ea0e3",
+   "version": "1.1",
    "test": []
   },
   "credencial.py": {
