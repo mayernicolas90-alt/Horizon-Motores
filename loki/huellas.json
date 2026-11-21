@@ -67,6 +67,14 @@
    "huella": "38f6b68bb3bb",
    "version": "1.0",
    "test": []
+  },
+  "enlace.py": {
+   "origen": "nuevo 21/11 (prototipo probado contra la base)",
+   "huella": "5a1e49f027b3",
+   "version": "0.1.0",
+   "test": [
+    "--autotest"
+   ]
   }
  }
 }
