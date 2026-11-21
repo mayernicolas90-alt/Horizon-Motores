@@ -1,0 +1,7 @@
+# nunca datos en este repositorio
+*.csv
+*.xlsx
+*.xls
+*.db
+datos/
+__pycache__/
