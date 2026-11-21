@@ -4,7 +4,7 @@
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "74ce06440199",
+   "huella": "eae6a854d12b",
    "version": "1.8.0",
    "test": [
     "--autotest"
@@ -12,8 +12,8 @@
   },
   "loki.py": {
    "origen": "loki-sql/scripts/loki.py",
-   "huella": "42dbc8a1afca",
-   "version": "v3",
+   "huella": "b341d4080dc9",
+   "version": "v3.1",
    "test": []
   },
   "motor.py": {

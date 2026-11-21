@@ -824,6 +824,8 @@ def apertura(datos, clase, falla, aviso):
                        + (f' · ojo: {ojo[:90]}' if ojo else ''))
         co, cf = u.get('cortas') or [], u.get('conflictos') or []
         out.append(f'CORTAS ({len(co)}): ' + (' · '.join(f"{str(x.get('cuenta'))[:22]} USD {x.get('usd')}" for x in co[:6]) or '-'))
+        pv = u.get('posventa') or []
+        out.append(f'POSVENTA · pestaña Posventa ({len(pv)}): ' + (' · '.join(f"{str(x.get('cuenta'))[:22]} {x.get('ref')}" for x in pv[:5]) or '-'))
         out.append(f'CONFLICTOS CRM ({len(cf)}): ' + (' · '.join(f"{str(x.get('cuenta'))[:22]}" for x in cf[:4]) or '-'))
     t = '\n'.join(out)
     return t if len(t) <= TOPE_APERTURA else t[:TOPE_APERTURA - 30].rsplit('\n', 1)[0] + '\n… (recortado)'

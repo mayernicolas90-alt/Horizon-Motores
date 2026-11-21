@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Loki · motor de apertura, control de datos, bitacora y verificacion de cierre (Horizon).
+"""Loki · motor de apertura, control de datos, bitacora y verificacion de cierre (Horizon). v3.1
+
+v3.1 (21/11): urgentes = solo venta (cierre, cotización, lead). Las entregas abiertas salen aparte en "posventa"
+  (pestaña Posventa) y ya no ocupan lugares del top 5 ni de cortas (regla N01).
 
 Uso (correr siempre con python3 -I, desde otra carpeta que los datos):
   loki.py abrir DIR [AAAA-MM-DD]        DIR con los archivos ya bajados (ver ARCHIVOS)
@@ -255,7 +258,7 @@ def urgentes(d, hoy):
     ops, cots = lista(col.get('oportunidades')), lista(col.get('cotizaciones'))
     por_id = {o.get('id'): o for o in ops}
     st = stock_de(d)
-    top, cortas, conflictos = [], [], []
+    top, cortas, conflictos, pos = [], [], [], []
     for c in cots:
         if c.get('archivada') or excluida(c.get('cliente')):
             continue
@@ -287,8 +290,8 @@ def urgentes(d, hoy):
                 continue
             if not entregado and (op.get('despacho') == 'pendiente' or op.get('entrega') in ('pendiente', 'parcial')):
                 pago = op.get('pago') == 'confirmado'
-                x = dict(base, b=2, tipo='posventa', por_que=('pagó y no recibió' if pago else 'entrega abierta') + (f', fecha vencida hace {dias(prox, hoy)} días' if prox and prox < hoy else ''), accion=acc[:90])
-                (top if pago and total >= MIN_USD and prox and prox < hoy and op.get('entrega') != 'parcial' else cortas).append(x)
+                # N01: la entrega es de la pestaña Posventa, no compite con la venta en el top 5
+                pos.append(dict(base, tipo='posventa', por_que=('pagó y no recibió' if pago else 'entrega abierta') + (f', fecha vencida hace {dias(prox, hoy)} días' if prox and prox < hoy else ''), accion=acc[:90]))
     con_cot = {c.get('oportunidadId') for c in cots if not c.get('archivada') and c.get('estado') in ABIERTAS}
     for o in ops:
         if o.get('archivada') or o.get('noProspectar') or excluida(o.get('empresa')) or o.get('id') in con_cot or o.get('etapa') == 'perdido':
@@ -304,7 +307,8 @@ def urgentes(d, hoy):
         top.remove(leads[0]); top.insert(4, leads[0])  # un lugar reservado: responder un lead cuesta poco
     vencidas = [o for o in ops if not o.get('archivada') and not o.get('noProspectar') and not excluida(o.get('empresa')) and o.get('etapa') != 'perdido' and (fecha(o.get('proximaFecha')) or hoy) < hoy]
     muestras = [m for m in lista(col.get('muestras')) if m.get('estado') in ('pedida', 'enviada', 'prueba')]
-    print(json.dumps(dict(hoy=hoy.isoformat(), top5=top[:5], siguen=top[5:], cortas=sorted(cortas, key=lambda x: -x['usd']), conflictos=conflictos, fichas_con_accion_vencida=len(vencidas), muestras_abiertas=len(muestras)), ensure_ascii=False, separators=(',', ':')))
+    print(json.dumps(dict(hoy=hoy.isoformat(), top5=top[:5], siguen=top[5:], cortas=sorted(cortas, key=lambda x: -x['usd']), conflictos=conflictos,
+                     posventa=sorted(pos, key=lambda x: (x['por_que'][:4] != 'pagó', -x['usd'])), fichas_con_accion_vencida=len(vencidas), muestras_abiertas=len(muestras)), ensure_ascii=False, separators=(',', ':')))
 
 
 if __name__ == '__main__':
