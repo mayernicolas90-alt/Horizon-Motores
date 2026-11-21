@@ -1,0 +1,72 @@
+{
+ "sellado": "2026-11-21",
+ "regla": "Los scripts se mudan, no se reescriben: cada archivo tiene la misma huella (sha256, 12 caracteres) que en la tabla scripts de la base de Loki. Un cambio va de a uno, con comparación antes/después y el «hacelo» de Nicolás, y actualiza su huella en el mismo commit.",
+ "scripts": {
+  "loki_sql.py": {
+   "origen": "loki-sql/scripts/loki_sql.py",
+   "huella": "74ce06440199",
+   "version": "1.8.0",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "loki.py": {
+   "origen": "loki-sql/scripts/loki.py",
+   "huella": "42dbc8a1afca",
+   "version": "v3",
+   "test": []
+  },
+  "motor.py": {
+   "origen": "loki-sql/scripts/motor.py",
+   "huella": "85d0caa1aab8",
+   "version": "1.2.0",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "recompra.py": {
+   "origen": "loki-sql/scripts/recompra.py",
+   "huella": "36c964918abd",
+   "version": "v3.1",
+   "test": []
+  },
+  "auditar.py": {
+   "origen": "loki-sql/scripts/auditar.py",
+   "huella": "d1374d6cda55",
+   "version": "1.1",
+   "test": []
+  },
+  "memoria_check.py": {
+   "origen": "loki-sql/scripts/memoria_check.py",
+   "huella": "87dac3076b95",
+   "version": "1.0.0",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "motor_regresion.py": {
+   "origen": "loki-sql/scripts/motor_regresion.py",
+   "huella": "5255e0cfec29",
+   "version": "1.0",
+   "test": []
+  },
+  "bitacora2.py": {
+   "origen": "loki-sql/scripts/bitacora2.py",
+   "huella": "c664121f6be3",
+   "version": "0.1.0",
+   "test": []
+  },
+  "conauth.py": {
+   "origen": "loki-pc/conauth.py",
+   "huella": "1a0b93ff843f",
+   "version": "1.0",
+   "test": []
+  },
+  "credencial.py": {
+   "origen": "loki-pc/credencial.py",
+   "huella": "38f6b68bb3bb",
+   "version": "1.0",
+   "test": []
+  }
+ }
+}
