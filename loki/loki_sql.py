@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""loki_sql.py v1.8.0 · la base SQL propia de Loki (Turso horizon-nicom90) · 18/11/2026
+"""loki_sql.py v1.9.0 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM FLgX se LEE (ArtifactData) y se copia acá.
+1.9.0 (22/11): el arranque lee el conocimiento en tablas (capa 1, k_*; tema #1002). `abrir --reglas` imprime reglas duras
+  enteras, el resto de las vigentes en una línea, preferencias, decisiones vigentes y motores por pestaña, todo desde
+  k_regla / k_preferencia / k_decision / k_motor (antes: prosa de reglas § Parte 0 + preferencias). `regla ID` y `reglas`
+  leen k_regla (estados vigente | historica; --tipo dura). Si la base no tiene k_regla, vuelve al cerebro en prosa.
 1.8.0 (18/11): orden y velocidad. Consultas del arranque agrupadas en lotes (qs: varias SELECT en un solo viaje a Turso;
   bajar, controles, clientes, crm_*, calidad, status y reglas). Esquema 6: stock guarda TODAS las columnas del R8
   (orden, partida, fechas, en_produccion: antes se perdía "En producción"). bajar/abrir bajan también motor.py.
@@ -86,7 +90,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 6
 CRM_ARRANQUE = ('oportunidades', 'cotizaciones', 'muestras')
@@ -909,7 +913,10 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False):
     if fac:
         print(f'  FACTURAS SIN CARGAR ({len(fac)}): ' + ' · '.join(fac))
     if reglas:
-        ped = (('reglas', 'Parte 0'), ('preferencias', None), ('respuestas', '1.'))
+        k = conocimiento(db)
+        ped = (('respuestas', '1.'),) if k else (('reglas', 'Parte 0'), ('preferencias', None), ('respuestas', '1.'))
+        if k:
+            print('\n' + k)
         for (i, _), t in zip(ped, docs_lote(db, ped)):
             print('\n' + (t or f'({i} no está en la base)'))
     return {'LISTO': 0, 'AVISO_FORMATO': 2, 'NO_LISTO_DATOS': 1}[clase]
@@ -1163,7 +1170,44 @@ def frescura(db, doc_id, tabla):
         return f'AVISO sin {tabla}: correr init e indexar-cerebro\n'
 
 
+def _hay_k(db):
+    return bool(q(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='k_regla'"))
+
+
+def conocimiento(db):
+    """Capa 1 (1.9.0): lo que Loki tiene que saber al abrir, desde las tablas k_*. None si la base no las tiene."""
+    if not _hay_k(db):
+        return None
+    du, ot, pr, de, mo = qs(db, [
+        "SELECT id, titulo, texto FROM k_regla WHERE estado='vigente' AND dura=1 ORDER BY id",
+        "SELECT id, titulo, aplica FROM k_regla WHERE estado='vigente' AND dura=0 ORDER BY id",
+        "SELECT id, tema, texto FROM k_preferencia ORDER BY tema, id",
+        "SELECT id, fecha, que FROM k_decision WHERE estado='vigente' ORDER BY fecha DESC, id",
+        "SELECT nombre, pestana, que_hace, estado FROM k_motor ORDER BY id"])
+    out = [f'CONOCIMIENTO (tablas k_*) · reglas duras {len(du)} · otras vigentes {len(ot)} · preferencias {len(pr)} · decisiones {len(de)}',
+           '## Reglas duras (no se negocian)']
+    out += [f"- {r['id']} · {r['titulo']}: {r['texto']}" for r in du]
+    out.append('## Otras reglas vigentes (detalle: `regla ID`)')
+    out.append(' · '.join(f"{r['id']} {r['titulo']}" + (f" [{r['aplica']}]" if r['aplica'] and r['aplica'] != 'todo' else '') for r in ot))
+    out.append('## Preferencias de Nicolás')
+    tema = None
+    for r in pr:
+        if r['tema'] != tema:
+            tema = r['tema']; out.append(f'{tema}:')
+        out.append(f"- {r['texto']}")
+    out.append(f'## Últimas decisiones (6 de {len(de)}; todas: sql k_decision)')
+    out += [f"- {r['id']} {str(r['fecha'])[8:10]}/{str(r['fecha'])[5:7]}: {r['que'][:120]}" for r in de[:6]]
+    out.append('## Motores → pestaña: ' + ' · '.join(f"{r['nombre']} → {r['pestana']} ({r['estado']})" for r in mo))
+    return '\n'.join(out)
+
+
 def regla(db, i):
+    if _hay_k(db):
+        r = q(db, 'SELECT * FROM k_regla WHERE upper(id)=upper(?)', i)
+        if r:
+            r = r[0]
+            cab = f"{r['id']} · {'dura' if r['dura'] else 'regla'} · {r['estado']}" + (f" → reemplazada por {r['reemplazada_por']}" if r['reemplazada_por'] else '')
+            return '\n'.join(x for x in [cab, r['titulo'], r['texto'], r['aplica'] and f"Aplica: {r['aplica']}", r['origen'] and f"Origen: {r['origen']}"] if x)
     av = frescura(db, 'reglas', 'cerebro_regla')
     r = q(db, 'SELECT * FROM cerebro_regla WHERE upper(id)=upper(?)', i) if not av.startswith('AVISO sin') else []
     if not r:
@@ -1176,6 +1220,17 @@ def regla(db, i):
 
 
 def reglas_lista(db, tipo=None, estado=None):
+    if _hay_k(db):
+        w, a = [], []
+        if tipo == 'dura':
+            w.append('dura=1')
+        elif tipo == 'pendiente':
+            w.append("estado='pendiente'")
+        if estado:
+            w.append('lower(estado) LIKE lower(?)'); a.append(estado + '%')
+        filas = q(db, 'SELECT id, dura, estado, titulo, texto FROM k_regla' + (' WHERE ' + ' AND '.join(w) if w else '') + ' ORDER BY estado DESC, id', *a)
+        return '\n'.join(f"{f['id']:<12} {'dura' if f['dura'] else 'regla':<6} {f['estado']:<10} {(f['titulo'] + ': ' + f['texto'])[:110]}"
+                         for f in filas) + f"\n({len(filas)} reglas · tablas k_*)"
     w, a = [], []
     if tipo:
         w.append('tipo=?'); a.append(tipo)
@@ -1298,6 +1353,25 @@ def autotest():
         chk('§1 no confunde con §10', doc(db, 'respuestas#1') == '## 1. Apertura\nTexto corto.')
         chk('router: docs y secciones', [(r['doc'], r['seccion']) for r in q(db, "SELECT doc, seccion FROM cerebro_router_doc WHERE intencion='apertura' ORDER BY n")]
             == [('loki_arranque', None), ('respuestas', '§1')] and 'Texto corto.' in intencion(db, 'apertura', True))
+        # 1.9.0: conocimiento desde las tablas k_* (sin ellas, el arranque vuelve a la prosa)
+        chk('sin k_regla: conocimiento None y regla desde el cerebro', conocimiento(db) is None and 'Viva.' in (regla(db, 'D02') or ''))
+        db.run([(x, []) for x in (
+            "CREATE TABLE k_regla (id TEXT PRIMARY KEY, titulo TEXT NOT NULL, texto TEXT NOT NULL, dura INTEGER NOT NULL DEFAULT 0, aplica TEXT, estado TEXT NOT NULL, reemplazada_por TEXT, desde TEXT, origen TEXT)",
+            "CREATE TABLE k_preferencia (id TEXT PRIMARY KEY, tema TEXT NOT NULL, texto TEXT NOT NULL, desde TEXT, origen TEXT)",
+            "CREATE TABLE k_decision (id TEXT PRIMARY KEY, fecha TEXT NOT NULL, que TEXT NOT NULL, efecto TEXT, estado TEXT NOT NULL DEFAULT 'vigente', origen TEXT)",
+            "CREATE TABLE k_motor (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, pestana TEXT, que_hace TEXT NOT NULL, lee TEXT, entrega TEXT, version TEXT, donde TEXT, estado TEXT)",
+            "INSERT INTO k_regla VALUES ('D01','Hacelo','nada sin hacelo.',1,'todo','vigente',NULL,NULL,'reglas §D01')",
+            "INSERT INTO k_regla VALUES ('N01','Cada motor en su pestaña','Sales solo venta.',0,'sales,posventa','vigente',NULL,NULL,NULL)",
+            "INSERT INTO k_regla VALUES ('P99','Vieja','ya no va.',1,'todo','historica','N01',NULL,NULL)",
+            "INSERT INTO k_preferencia VALUES ('PR01','Cómo hablarle','Rioplatense.',NULL,NULL)",
+            "INSERT INTO k_decision VALUES ('DEC-1','2026-11-21','Finnegans manual.',NULL,'vigente',NULL)",
+            "INSERT INTO k_decision VALUES ('DEC-0','2026-11-20','Finnegans automático.',NULL,'historica',NULL)",
+            "INSERT INTO k_motor VALUES ('sales','Sales Engine','Sales','Empuja la venta.',NULL,NULL,NULL,NULL,'sellado')")])
+        k = conocimiento(db) or ''
+        chk('conocimiento: dura entera, otra en una línea, sin históricas', '- D01 · Hacelo: nada sin hacelo.' in k and 'N01 Cada motor en su pestaña [sales,posventa]' in k and 'P99' not in k)
+        chk('conocimiento: preferencias, solo decisiones vigentes y motores', 'Rioplatense.' in k and 'DEC-1 21/11' in k and 'DEC-0' not in k and 'Sales Engine → Sales (sellado)' in k)
+        chk('regla desde k_regla con reemplazo', regla(db, 'p99').startswith('P99 · dura · historica → reemplazada por N01'))
+        chk('reglas --tipo dura desde k_regla', reglas_lista(db, 'dura').count(chr(10)) == 2 and '(2 reglas · tablas k_*)' in reglas_lista(db, 'dura'))
         chk('índice al día', indice_al_dia(db) == [])
         db.run([("UPDATE cerebro SET texto=texto||'x', sha256=? WHERE id='respuestas'", [sha(tres + 'x')])])
         chk('doc cambiado sin indexar: L7 y doc lee el texto nuevo', indice_al_dia(db) == ['respuestas'] and doc(db, 'respuestas').endswith('x'))

@@ -1,11 +1,11 @@
 {
- "sellado": "2026-11-21",
+ "sellado": "2026-11-22",
  "regla": "Los scripts se mudan, no se reescriben: cada archivo tiene la misma huella (sha256, 12 caracteres) que en la tabla scripts de la base de Loki. Un cambio va de a uno, con comparación antes/después y el «hacelo» de Nicolás, y actualiza su huella en el mismo commit.",
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "eae6a854d12b",
-   "version": "1.8.0",
+   "huella": "643e124f6a31",
+   "version": "1.9.0",
    "test": [
     "--autotest"
    ]
