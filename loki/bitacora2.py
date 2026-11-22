@@ -4,11 +4,11 @@ Un TEMA es un compromiso abierto con: quién lo tiene (espera), qué sigue (prox
 cuándo se mira (revisar) y, si se puede, un CHEQUEO que la máquina verifica contra la base
 (CRM, R10, stock). Cada novedad es un EVENTO (no se reescribe el texto).
 
-Uso (siempre con conauth para leer Turso):
-  python3 -I -X utf8 ~/.loki/conauth.py bitacora2.py crear  DB
-  python3 -I -X utf8 ~/.loki/conauth.py bitacora2.py migrar DB migracion.json bitacora.jsonl
-  python3 -I -X utf8 ~/.loki/conauth.py bitacora2.py chequear DB HOY      # corre chequeos, cierra solos, marca conflictos
-  python3 -I -X utf8 ~/.loki/conauth.py bitacora2.py hoy DB HOY           # vista corta para la apertura
+Uso (en la nube el proxy pone el token de Turso):
+  python3 -I -X utf8 bitacora2.py crear  DB
+  python3 -I -X utf8 bitacora2.py migrar DB migracion.json bitacora.jsonl
+  python3 -I -X utf8 bitacora2.py chequear DB HOY      # corre chequeos, cierra solos, marca conflictos
+  python3 -I -X utf8 bitacora2.py hoy DB HOY           # vista corta para la apertura
 DB = archivo SQLite local (copia de prueba) o 'turso' (base real; escribe: requiere hacelo).
 """
 import json, sqlite3, sys, urllib.request, datetime as dt

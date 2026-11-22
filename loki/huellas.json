@@ -4,8 +4,8 @@
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "b452c0fb0e3f",
-   "version": "1.9.1",
+   "huella": "5307b2afca73",
+   "version": "1.10.0",
    "test": [
     "--autotest"
    ]
@@ -52,20 +52,8 @@
   },
   "bitacora2.py": {
    "origen": "loki-sql/scripts/bitacora2.py",
-   "huella": "c664121f6be3",
+   "huella": "99712b718680",
    "version": "0.1.0",
-   "test": []
-  },
-  "conauth.py": {
-   "origen": "loki-pc/conauth.py",
-   "huella": "f9e0620ea0e3",
-   "version": "1.1",
-   "test": []
-  },
-  "credencial.py": {
-   "origen": "loki-pc/credencial.py",
-   "huella": "38f6b68bb3bb",
-   "version": "1.0",
    "test": []
   },
   "enlace.py": {

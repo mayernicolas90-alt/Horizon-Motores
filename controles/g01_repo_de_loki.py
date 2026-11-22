@@ -1,5 +1,5 @@
 """G01 · guardia: este repositorio sube solo a la cuenta de Loki (mayernicolas90-alt) y los commits salen a su nombre.
-Corre como pre-push y en ci. (21/11: el primer commit de controles salió firmado por la otra cuenta.)"""
+Corre en ci (en la nube no hay pre-push; desde el 22/11). (21/11: el primer commit de controles salió firmado por la otra cuenta.)"""
 import os, subprocess, sys
 CUENTA = 'mayernicolas90-alt'
 

@@ -1,12 +1,12 @@
 # Loki · capa sobre su base SQL
 
-Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom90`, cuenta de Loki). Estos scripts vivían solo en la tabla `scripts` de esa base; se mudaron acá el 21/11 **idénticos byte por byte** (sha256 verificado contra la base). Regla: se mudan, no se reescriben; un cambio va de a uno, con comparación antes/después, el «hacelo» de Nicolás y su huella en `loki/huellas.json` en el mismo commit. `python -I -X utf8 loki/verificar.py` controla huellas y autotests (GitHub lo corre en cada cambio).
+Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom90`, cuenta de Loki). Estos scripts vivían solo en la tabla `scripts` de esa base; se mudaron acá el 21/11 **idénticos byte por byte** (sha256 verificado contra la base). Regla: se mudan, no se reescriben; un cambio va de a uno, con comparación antes/después, el «hacelo» de Nicolás y su huella en `loki/huellas.json` en el mismo commit. `python -I -X utf8 loki/verificar.py` controla huellas y autotests (GitHub lo corre en cada cambio). La guardia G02 (escribir en el CRM sin «hacelo») corre como hook de Claude Code desde `.claude/settings.json` de este repositorio.
 
 **Acá no hay datos ni secretos.** Los datos viven en la base de Loki; el token de Turso, como secreto del entorno de la nube (lo pone el proxy). La otra cuenta tiene su propia base y su propio repositorio: no se mezclan.
 
 | Archivo | Versión | Qué hace | Autotest |
 |---|---|---|---|
-| `loki_sql.py` | 1.9.1 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status | `--autotest` (88/88) |
+| `loki_sql.py` | 1.10.0 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status | `--autotest` (91/91) |
 | `loki.py` | v3 | Números de la apertura y urgentes (lo llama `loki_sql.py abrir`) | — |
 | `motor.py` | 1.2.0 | Pedidos de producto: lista del CRM, stock (Hive en vivo o R8), fichas técnicas | `--autotest` (28/28) |
 | `motor_regresion.py` | 1.0 | Corre un `motor.py` sobre las cotizaciones del CRM para comparar versiones | — |
@@ -14,12 +14,10 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 | `auditar.py` | 1.1 | Audita un reporte de Finnegans contra el registro antes de cargarlo | — |
 | `memoria_check.py` | 1.0.0 | Aplica la memoria de cuentas (AJUSTAR / AVISO / BOX) a la apertura | `--autotest` (10/10) |
 | `bitacora2.py` | 0.1.0 | Bitácora 2: temas + eventos + chequeos contra CRM, R10 y stock | — |
-| `conauth.py` | 1.0 | Sin uso desde el 22/11 (era el lanzador de la PC) | — |
-| `credencial.py` | 1.0 | Sin uso desde el 22/11 (token en el Administrador de credenciales de Windows) | — |
 
 ## Dónde corre (desde el 22/11)
 
-Loki vive **solo en la nube** (claude.ai/code): el token de Turso lo pone el proxy del entorno y no hace falta lanzador. La PC salió del circuito porque ahí conviven las dos cuentas. Finnegans se adjunta en el chat; los cambios de motores van por rama + PR en este repositorio y, aprobados, se cargan con la misma huella a la tabla `scripts` de la base.
+Loki vive **solo en la nube** (claude.ai/code): el token de Turso lo pone el proxy del entorno. Finnegans se adjunta en el chat; los cambios de motores van por rama + PR en este repositorio y, aprobados, se cargan con la misma huella a la tabla `scripts` de la base.
 
 ```
 python3 -I loki_sql.py abrir RAIZ AAAA-MM-DD --crm RAIZ/CRM --reglas

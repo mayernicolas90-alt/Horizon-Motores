@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "ArtifactData",
+        "hooks": [
+          { "type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR/controles/hooks/guardia_hacelo.py\"" }
+        ]
+      }
+    ]
+  }
+}
