@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""loki_sql.py v1.9.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
+"""loki_sql.py v1.10.0 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM FLgX se LEE (ArtifactData) y se copia acá.
+1.10.0 (22/11): conocimiento-cargar ARCHIVO.json: alta o cambio de filas de las tablas k_* (decisiones, reglas,
+  procedimientos, fuentes, documentos) con columnas validadas, todo o nada. Antes no había cómo escribirlas desde Loki.
 1.9.1 (22/11): bajar/abrir bajan también bitacora2.py (antes el chequeo de la bitácora se hacía a mano). Loki vive en la nube.
 1.9.0 (22/11): el arranque lee el conocimiento en tablas (capa 1, k_*; tema #1002). `abrir --reglas` imprime reglas duras
   enteras, el resto de las vigentes en una línea, preferencias, decisiones vigentes y motores por pestaña, todo desde
@@ -71,6 +73,8 @@ CARGA (escribe en la base: solo con hacelo, salvo crm/continuidad que son parte 
   loki_sql.py indexar-cerebro               rearma cerebro_seccion / cerebro_regla / cerebro_router desde la tabla cerebro
   loki_sql.py cargar-fichas fichas.json [FECHA]
   loki_sql.py cargar-script NOMBRE ARCHIVO VERSION
+  loki_sql.py conocimiento-cargar ARCHIVO.json   {"k_decision": [{"id": .., campo: valor}], ...}: alta o cambio por id en las
+                                           tablas k_* (solo columnas que existen; todo o nada). Con hacelo.
   loki_sql.py armar-clientes                rearma clientes / cliente_alias (derivadas; también corre en cada abrir)
   loki_sql.py armar-crm                     rearma las tablas ordenadas crm_* desde la copia `crm` (también corre en cada abrir)
   loki_sql.py migrar-continuidad            una vez: `abiertos` de la continuidad → bitácora (idempotente)
@@ -91,7 +95,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.9.1"
+VERSION = "1.10.0"
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 6
 CRM_ARRANQUE = ('oportunidades', 'cotizaciones', 'muestras')
@@ -324,6 +328,35 @@ def qs(db, consultas):
     """Varias lecturas en UN viaje a Turso (1.8.0). consultas = [sql | (sql, [args])] → [[dict, ...], ...] en el mismo orden."""
     st = [(c, []) if isinstance(c, str) else (c[0], list(c[1])) for c in consultas]
     return [[dict(zip(cols, f)) for f in filas] for cols, filas in db.run(st)]
+
+
+def conocimiento_cargar(db, cambios):
+    """1.10.0: alta o cambio por id en tablas k_*. cambios = {tabla: [fila, ...]}; cada fila trae id y solo columnas existentes."""
+    if not isinstance(cambios, dict) or not cambios:
+        raise ValueError('conocimiento-cargar: se espera {tabla: [filas]}')
+    st, n = [], {}
+    for t, filas in cambios.items():
+        if not re.match(r'^k_[a-z_]+$', t):
+            raise ValueError(f'conocimiento-cargar: {t} no es una tabla k_*')
+        cols = [r['name'] for r in q(db, f'PRAGMA table_info({t})')]
+        if not cols:
+            raise ValueError(f'conocimiento-cargar: la tabla {t} no existe')
+        ids = {r['id'] for r in q(db, f'SELECT id FROM {t}')}
+        for f in filas:
+            if not isinstance(f, dict) or not f.get('id'):
+                raise ValueError(f'conocimiento-cargar: {t}: fila sin id')
+            otras = sorted(set(f) - set(cols))
+            if otras:
+                raise ValueError(f"conocimiento-cargar: {t}/{f['id']}: columnas que no existen: {', '.join(otras)}")
+            ks = [k for k in f if k != 'id']
+            if f['id'] in ids:
+                if ks:
+                    st.append((f"UPDATE {t} SET {', '.join(k + '=?' for k in ks)} WHERE id=?", [f[k] for k in ks] + [f['id']]))
+            else:
+                st.append((f"INSERT INTO {t} ({', '.join(['id'] + ks)}) VALUES ({', '.join('?' * (len(ks) + 1))})", [f['id']] + [f[k] for k in ks]))
+            n[t] = n.get(t, 0) + 1
+    transaccion(db, st)
+    return n
 
 
 def transaccion(db, stmts):
@@ -1373,6 +1406,23 @@ def autotest():
         chk('conocimiento: preferencias, solo decisiones vigentes y motores', 'Rioplatense.' in k and 'DEC-1 21/11' in k and 'DEC-0' not in k and 'Sales Engine → Sales (sellado)' in k)
         chk('regla desde k_regla con reemplazo', regla(db, 'p99').startswith('P99 · dura · historica → reemplazada por N01'))
         chk('reglas --tipo dura desde k_regla', reglas_lista(db, 'dura').count(chr(10)) == 2 and '(2 reglas · tablas k_*)' in reglas_lista(db, 'dura'))
+        # 1.10.0: conocimiento-cargar
+        nk = conocimiento_cargar(db, {'k_decision': [{'id': 'DEC-1', 'estado': 'historica'}, {'id': 'DEC-2', 'fecha': '2026-11-22', 'que': 'Solo nube.'}]})
+        k = conocimiento(db) or ''
+        chk('conocimiento-cargar: cambia y agrega por id', nk == {'k_decision': 2} and 'DEC-2 22/11' in k and 'DEC-1 21/11' not in k)
+        try:
+            conocimiento_cargar(db, {'k_decision': [{'id': 'DEC-3', 'fecha': 'x', 'que': 'y'}, {'id': 'DEC-2', 'inventada': 1}]})
+            rechaza = False
+        except ValueError:
+            rechaza = True
+        chk('conocimiento-cargar: columna inexistente = nada escrito', rechaza and not q(db, "SELECT 1 FROM k_decision WHERE id='DEC-3'"))
+        try:
+            conocimiento_cargar(db, {'cerebro': [{'id': 'x'}]}); rechaza = False
+        except ValueError:
+            rechaza = True
+        chk('conocimiento-cargar: solo tablas k_*', rechaza)
+        conocimiento_cargar(db, {'k_decision': [{'id': 'DEC-1', 'estado': 'vigente'}]})
+        db.run([("DELETE FROM k_decision WHERE id='DEC-2'", [])])
         chk('índice al día', indice_al_dia(db) == [])
         db.run([("UPDATE cerebro SET texto=texto||'x', sha256=? WHERE id='respuestas'", [sha(tres + 'x')])])
         chk('doc cambiado sin indexar: L7 y doc lee el texto nuevo', indice_al_dia(db) == ['respuestas'] and doc(db, 'respuestas').endswith('x'))
@@ -2447,6 +2497,8 @@ def main(argv):
                 print('uso: status-url CUIT https://claude.ai/artifact/ID'); return 1
             transaccion(db, [(x, []) for x in ST_DDL] + [('INSERT OR REPLACE INTO status_pagina VALUES (?,?,?)', [c, a[1], ahora()])])
             print('OK', c, a[1])
+        elif op == 'conocimiento-cargar':
+            print('OK conocimiento', conocimiento_cargar(db, leer_json(a[0])))
         elif op == 'cargar-script':
             print('OK script', a[0], cargar_script(db, a[0], a[1], a[2])[:12])
         else:
