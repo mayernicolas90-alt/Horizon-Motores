@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""loki_sql.py v1.10.0 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
+"""loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM FLgX se LEE (ArtifactData) y se copia acá.
+1.10.1 (22/11): cargar-continuidad exige `importante` no vacío y abrir no se cae si falta (una sesión la dejó en null).
 1.10.0 (22/11): conocimiento-cargar ARCHIVO.json: alta o cambio de filas de las tablas k_* (decisiones, reglas,
   procedimientos, fuentes, documentos) con columnas validadas, todo o nada. Antes no había cómo escribirlas desde Loki.
 1.9.1 (22/11): bajar/abrir bajan también bitacora2.py (antes el chequeo de la bitácora se hacía a mano). Loki vive en la nube.
@@ -95,7 +96,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.10.0"
+VERSION = "1.10.1"
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 6
 CRM_ARRANQUE = ('oportunidades', 'cotizaciones', 'muestras')
@@ -603,8 +604,9 @@ def cargar_memoria(db, d):
 
 def cargar_continuidad(db, p):
     d = leer_json(p)
-    if len((d.get('importante') or '').encode()) >= 1000 or not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d.get('actualizado'))):
-        raise ValueError('continuidad: importante < 1000 bytes y actualizado AAAA-MM-DD son obligatorios')
+    imp = (d.get('importante') or '').strip()
+    if not imp or len(imp.encode()) >= 1000 or not re.match(r'^\d{4}-\d{2}-\d{2}$', str(d.get('actualizado'))):
+        raise ValueError('continuidad: importante (no vacío, < 1000 bytes) y actualizado AAAA-MM-DD son obligatorios')
     transaccion(db, [('INSERT OR REPLACE INTO continuidad VALUES (?,?,?,?)', ['actual', d.get('actualizado'), d.get('importante'), jdump(d)]),
                      ('INSERT OR REPLACE INTO continuidad VALUES (?,?,?,?)', ['h:' + ahora(), d.get('actualizado'), d.get('importante'), jdump(d)]),
                      carga_stmt('continuidad', d.get('actualizado'), 1, sha(d.get('importante') or ''), 'cierre de chat', {})])
@@ -909,7 +911,7 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False):
         b, gsd = b[0], gsd[0]['n']
     except Exception:  # noqa: BLE001  se cae a las consultas sueltas de siempre
         con, b, ult, gsd = q(db, "SELECT importante FROM continuidad WHERE id='actual'"), None, None, None
-    print('IMPORTANTE: ' + (con[0]['importante'] if con else '(sin continuidad)'))
+    print('IMPORTANTE: ' + ((con[0]['importante'] or '(continuidad sin importante: avisar y rehacerla al cerrar)') if con else '(sin continuidad)'))
     print(apertura(datos, clase, falla, aviso))
     try:
         b = b or q(db, "SELECT COUNT(*) n, SUM(estado='abierto') a FROM bitacora")[0]
@@ -1357,6 +1359,11 @@ def autotest():
             cargar_continuidad(db, f'{base}/contmal.json'); chk('continuidad mal formada se rechaza', False)
         except ValueError:
             chk('continuidad mal formada se rechaza', True)
+        w(f'{base}/contvacia.json', json.dumps({'actualizado': '2026-11-16', 'abiertos': []}))
+        try:
+            cargar_continuidad(db, f'{base}/contvacia.json'); chk('continuidad sin importante se rechaza', False)
+        except ValueError:
+            chk('continuidad sin importante se rechaza', True)
         w(f'{base}/cont.json', json.dumps({'importante': 'x' * 50, 'actualizado': '2026-11-16'}))
         cargar_continuidad(db, f'{base}/cont.json')
         t = '# Reglas\n## Parte 0 · Duras\n- D01\n## Parte 1\n- otra\n'
