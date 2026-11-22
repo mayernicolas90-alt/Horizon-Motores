@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""loki_sql.py v1.9.0 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
+"""loki_sql.py v1.9.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM FLgX se LEE (ArtifactData) y se copia acá.
+1.9.1 (22/11): bajar/abrir bajan también bitacora2.py (antes el chequeo de la bitácora se hacía a mano). Loki vive en la nube.
 1.9.0 (22/11): el arranque lee el conocimiento en tablas (capa 1, k_*; tema #1002). `abrir --reglas` imprime reglas duras
   enteras, el resto de las vigentes en una línea, preferencias, decisiones vigentes y motores por pestaña, todo desde
   k_regla / k_preferencia / k_decision / k_motor (antes: prosa de reglas § Parte 0 + preferencias). `regla ID` y `reglas`
@@ -90,7 +91,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 6
 CRM_ARRANQUE = ('oportunidades', 'cotizaciones', 'muestras')
@@ -216,7 +217,7 @@ DDL = [
     " OR NULLIF(TRIM(COALESCE(o.domicilio,c.domicilio)),'') IS NULL) ORDER BY ganada DESC",
 ]
 BAJAR_ARCHIVOS = ('R10.csv', 'R8.csv', 'recompra.json')
-BAJAR_SCRIPTS = ('loki.py', 'memoria_check.py', 'motor.py')    # 1.8.0: motor.py baja en cada arranque (#65)
+BAJAR_SCRIPTS = ('loki.py', 'memoria_check.py', 'motor.py', 'bitacora2.py')    # 1.8.0: motor.py (#65) · 1.9.1: bitacora2.py (chequear al abrir)
 TABLA_DE = {'R10': 'ventas', 'R8': 'stock', 'recompra': 'recompra', 'cuentas': 'cuentas', 'aprendizajes': 'aprendizajes'}
 
 
