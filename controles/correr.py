@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Corre los controles del registro (controles/registro.json).
   python -I -X utf8 controles/correr.py ci       sin datos reales (GitHub, en cada cambio)
-  python -I -X utf8 %USERPROFILE%/.loki/conauth.py controles/correr.py diario --hoy AAAA-MM-DD
-        con la base de Loki: guarda el resultado y abre un tema en la bitácora por cada FALLA nueva.
+  python3 -I -X utf8 controles/correr.py diario --hoy AAAA-MM-DD
+        con la base de Loki (en la nube; el proxy pone el token): corre al abrir «Loki» (desde el 22/11),
+        guarda el resultado y abre un tema en la bitácora por cada FALLA nueva.
 Un error sin control puede repetirse: el registro lista también los que faltan."""
 import importlib.util, json, os, sys, datetime as dt
 
