@@ -65,9 +65,9 @@
    ]
   },
   "importar.py": {
-   "origen": "nuevo 23/11 (probado contra los reportes de Finnegans del 16-20/11 y la base de Loki)",
-   "huella": "6c4ca3ddedfd",
-   "version": "0.2",
+   "origen": "23/11: 0.2 + cuentas ajenas desde el CRM (--crm) y FALLA ante reporte incompleto; probado con el R10 del 20/11 (PASA) y el GIANNINA3 recortado del 23/11 (FALLA)",
+   "huella": "f3f1256ef715",
+   "version": "0.3",
    "test": [
     "--autotest"
    ]
