@@ -14,6 +14,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 | `auditar.py` | 1.1 | Audita un reporte de Finnegans contra el registro antes de cargarlo | — |
 | `memoria_check.py` | 1.0.0 | Aplica la memoria de cuentas (AJUSTAR / AVISO / BOX) a la apertura | `--autotest` (10/10) |
 | `bitacora2.py` | 0.1.0 | Bitácora 2: temas + eventos + chequeos contra CRM, R10 y stock | — |
+| `importar.py` | 0.2 | Filtro de limpieza de Finnegans: comprobante por TransaccionID, NC vinculadas a su factura (referencia, producto y cantidad, facturas idénticas), anticipos y diferencias de cambio fuera, faltantes contra la cabecera, pedidos sin factura (con tolerancia por descuento contado). Deja `limpia_*` en la base con `--subir-turso` (solo con hacelo) | `--autotest` (11/11) |
 
 ## Dónde corre (desde el 22/11)
 
