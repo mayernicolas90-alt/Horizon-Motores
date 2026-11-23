@@ -63,6 +63,14 @@
    "test": [
     "--autotest"
    ]
+  },
+  "render_pdf.py": {
+   "origen": "nuevo 23/11 (pedido de Nicolás: nitidez del modelo NM53; probado contra el NM53 del PM y la NM57 de prueba)",
+   "huella": "f99826868cc6",
+   "version": "0.1",
+   "test": [
+    "--autotest"
+   ]
   }
  }
 }

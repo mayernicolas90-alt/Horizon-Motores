@@ -22,4 +22,5 @@ Loki vive **solo en la nube** (claude.ai/code): el token de Turso lo pone el pro
 ```
 python3 -I loki_sql.py abrir RAIZ AAAA-MM-DD --crm RAIZ/CRM --reglas
 python3 -I RAIZ/SCRIPTS/bitacora2.py chequear turso AAAA-MM-DD
-```
+```| `render_pdf.py` | 0.1 | Imprime en la PC las piezas HTML del cotizador (Chrome o Edge sin interfaz) con la nitidez del modelo NM53: corrige las rutas de las fuentes en Windows, imagen de control a escala 2 y control de nitidez (A4, 0 imágenes ráster, fuentes incrustadas, Manrope e Inter presentes) | `--autotest` (7/7) |
+
