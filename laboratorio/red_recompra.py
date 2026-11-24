@@ -173,7 +173,8 @@ def pronosticar(db, hoy):
     """Guarda la lista de hoy de cada política en red_pred (tabla propia, DEC-1124a). Una corrida por día:
     si ya hay filas de ese corte y versión, se reemplazan. Se mide a los 30 días contra limpia_compras_firmes."""
     compras = leer(db)
-    excl = {r[0] for r in db.run([('SELECT cuit FROM cue_cuentas WHERE trabajar = 0 AND cuit IS NOT NULL', [])])[0][1]}
+    # excluidas = no prospectar, otro vendedor o archivada. «unificada» NO: es una ficha duplicada y su CUIT compra
+    excl = {r[0] for r in db.run([("SELECT cuit FROM cue_cuentas WHERE estado IN ('no_prospectar','otro_vendedor','archivada') AND cuit IS NOT NULL", [])])[0][1]}
     F = fotos(compras, max(c[0] for cs in compras.values() for c in cs))
     X = np.array([f['x'] for f in F]); y = np.array([f['y'] for f in F], float)
     H = []
@@ -203,7 +204,7 @@ def pronosticar(db, hoy):
     return dict(corte=hoy.isoformat(), clientes=len(H), excluidos=len(excl & {h['cuit'] for h in H}), filas=len(filas))
 
 
-VERSION = 'red_recompra 0.2'
+VERSION = 'red_recompra 0.3'
 
 
 def main(a):
