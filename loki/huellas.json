@@ -4,8 +4,8 @@
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "40cf730b2370",
-   "version": "1.10.1",
+   "huella": "562430d11e83",
+   "version": "1.11.0",
    "test": [
     "--autotest"
    ]
@@ -68,6 +68,14 @@
    "origen": "23/11: 0.2 + cuentas ajenas desde el CRM (--crm) y FALLA ante reporte incompleto; probado con el R10 del 20/11 (PASA) y el GIANNINA3 recortado del 23/11 (FALLA)",
    "huella": "f3f1256ef715",
    "version": "0.3",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "auditor.py": {
+   "origen": "nuevo 23/11 (Fase 1 del plan «auditor de entrada»): recibir, clasificar, verificar y publicar los reportes de Finnegans; probado en copia local: Reporte (27) a cuarentena, Reportedsd verificado y publicado (1457 filas)",
+   "huella": "d2b8f4eff626",
+   "version": "0.1",
    "test": [
     "--autotest"
    ]
