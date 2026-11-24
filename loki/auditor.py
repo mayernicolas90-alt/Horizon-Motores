@@ -18,7 +18,7 @@ Uso (python3 -I): auditor.py correr --corrida N [--loki ruta] · auditor.py --co
 """
 import csv, datetime as D, importlib.util, io, json, os, re, sys
 
-VERSION = 'auditor 0.4 · 2026-11-24'
+VERSION = 'auditor 0.5 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 EMPRESA = 'HORIZON TRADING S.A.'
 CONTRATO = {'id': 'auditor', 'nombre': 'Auditor', 'disparo': 'cada corrida', 'lee': ['*'], 'escribe': ['aud_resultados'],
@@ -150,7 +150,20 @@ def controles_puntaje(db, R):
     R('P6', 'toda ficha activa del CRM está evaluada', 'PASA' if not falta else 'FALLA', f'{falta} fichas sin evaluar')
 
 
-CONTROLES = {'limpieza': controles_limpieza, 'recompra': controles_recompra, 'cuentas': controles_cuentas, 'puntaje': controles_puntaje}
+def controles_portada(db, R):
+    f = q(db, 'SELECT p.*, u.elegible, u.s AS s_pun, u.funding FROM por_dia p LEFT JOIN pun_fichas u ON u.crm_id = p.crm_id ORDER BY p.puesto')
+    R('O1', 'una sola lista de hasta 10, puestos correlativos', 'PASA' if 0 < len(f) <= 10 and [x['puesto'] for x in f] == list(range(1, len(f) + 1)) else 'FALLA', f'{len(f)} puestos')
+    exc = uno(db, 'SELECT count(*) FROM por_dia p JOIN cue_cuentas c ON c.crm_id = p.crm_id WHERE c.trabajar = 0')
+    R('O2', 'ninguna cuenta que no se trabaja', 'PASA' if not exc else 'FALLA', f'{exc} excluidas en la lista')
+    mal = [x['empresa'] for x in f if not x['elegible'] or x['s_pun'] is None or x['funding'] == 'sin_fondos' or x['s'] != x['s_pun']]
+    R('O3', 'todos elegibles hoy, con puntaje y sin «sin fondos»', 'PASA' if not mal else 'FALLA', ', '.join(mal) or 'todos')
+    R('O4', 'ordenada por puntaje con monto', 'PASA' if [x['s'] for x in f] == sorted((x['s'] for x in f), reverse=True) else 'FALLA', ' · '.join(str(x['s']) for x in f))
+    t = {x['tipo'] for x in f}
+    R('O5', 'aparecen los dos tipos de venta', 'PASA' if t == {'rapida', 'consultiva'} else 'AVISO',
+      f"{sum(x['tipo'] == 'rapida' for x in f)} rápidas · {sum(x['tipo'] == 'consultiva' for x in f)} consultivas")
+
+
+CONTROLES = {'limpieza': controles_limpieza, 'recompra': controles_recompra, 'cuentas': controles_cuentas, 'puntaje': controles_puntaje, 'portada': controles_portada}
 
 
 def correr(corrida, loki_ruta=None):

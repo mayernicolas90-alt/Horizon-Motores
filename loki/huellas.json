@@ -76,16 +76,16 @@
   },
   "dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "5c919ad851ce",
-   "version": "0.5",
+   "huella": "8d52e62ab86b",
+   "version": "0.6",
    "test": [
     "--autotest"
    ]
   },
   "auditor.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/c)",
-   "huella": "ba4310f78651",
-   "version": "0.4",
+   "huella": "407190d1e763",
+   "version": "0.5",
    "test": [
     "--autotest"
    ]
@@ -102,6 +102,14 @@
    "origen": "nuevo 24/11 (motor Puntaje del datacenter, reglas V143 del CRM)",
    "huella": "eedbb74829a1",
    "version": "0.2",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "portada.py": {
+   "origen": "nuevo 24/11 (motor Portada del datacenter)",
+   "huella": "53a5a0e951e5",
+   "version": "0.1",
    "test": [
     "--autotest"
    ]
