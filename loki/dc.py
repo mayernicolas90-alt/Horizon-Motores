@@ -25,7 +25,7 @@ Uso (python3 -I):
 """
 import datetime as D, hashlib, importlib.util, json, os, subprocess, sys
 
-VERSION = 'dc 0.3 · 2026-11-24'
+VERSION = 'dc 0.4 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 MOTORES = ['importar.py', 'recompra.py', 'cuentas.py']   # en orden: un motor solo lee lo que dejaron los anteriores
 AUDITOR = 'auditor.py'
@@ -87,7 +87,11 @@ def huella(db, lee, version=''):
         else:
             try:
                 f = q(db, f'SELECT count(*) n, max(rowid) m FROM "{e}"')[0]
-                partes.append(f"{e}={f['n']}/{f['m']}")
+                if (f['n'] or 0) <= 5000:   # 0.4: tablas chicas por contenido completo (detecta cambios en filas existentes, ej. una regla editada)
+                    filas = db.run([(f'SELECT * FROM "{e}" ORDER BY rowid', [])])[0][1]
+                    partes.append(e + '=' + hashlib.sha256(json.dumps(filas, default=str).encode()).hexdigest()[:16])
+                else:
+                    partes.append(f"{e}={f['n']}/{f['m']}")
             except RuntimeError:
                 partes.append(e + '=falta')
     return hashlib.sha256('|'.join(partes).encode()).hexdigest()[:16]

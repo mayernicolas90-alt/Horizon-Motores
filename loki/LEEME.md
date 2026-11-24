@@ -16,7 +16,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 | `memoria_check.py` | 1.0.0 | Aplica la memoria de cuentas (AJUSTAR / AVISO / BOX) a la apertura | `--autotest` (10/10) |
 | `bitacora2.py` | 0.1.0 | Bitácora 2: temas + eventos + chequeos contra CRM, R10 y stock | — |
 | `importar.py` | 0.4 | Motor **Limpieza** del datacenter (lee R10/R23/R24 de `archivos` con `correr`; sinónimos de columnas): comprobante por TransaccionID, NC vinculadas a su factura (referencia, producto y cantidad, facturas idénticas), anticipos y diferencias de cambio fuera, faltantes contra la cabecera, pedidos sin factura (con tolerancia por descuento contado). Deja `limpia_*` en la base con `--subir-turso` (solo con hacelo) | `--autotest` (16/16) |
-| `dc.py` | 0.3 | **Orquestador del datacenter** (DEC-1124): lee el contrato de cada motor, lo corre solo si cambiaron sus tablas de entrada o su versión, verifica que no escriba fuera de su contrato, llama al auditor y registra todo en `dc_motores` / `dc_corridas` | `--autotest` (6/6) |
+| `dc.py` | 0.4 | **Orquestador del datacenter** (DEC-1124): lee el contrato de cada motor, lo corre solo si cambiaron sus tablas de entrada o su versión, verifica que no escriba fuera de su contrato, llama al auditor y registra todo en `dc_motores` / `dc_corridas` | `--autotest` (6/6) |
 | `auditor.py` | 0.3 | **Auditor**: controles generales (terminó bien, contrato) de Limpieza, Recompra y Cuentas (regla D07 legible, conflictos, cobertura de CUIT; una fila por SKU, cobertura, ciclo coherente, última compra firme; entrada = salida contra R10, NC sueltas, cantidades, sin precios, frescura, pendientes propios). Solo escribe `aud_resultados` | `--autotest` (7/7) |
 
 ## Datacenter (desde el 24/11, DEC-1124a/b/c)
