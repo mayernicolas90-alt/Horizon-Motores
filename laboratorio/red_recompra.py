@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """red_recompra.py 0.2 · laboratorio (24/11/2026) · ¿quién compra en los próximos 30 días?
 
-Experimento, no motor. La prueba hacia atrás solo lee Turso; «pronosticar» escribe únicamente su tabla nn_pronostico.
+Experimento, no motor. La prueba hacia atrás solo lee Turso; «pronosticar» escribe únicamente su tabla red_pred.
 Arma "fotos" del pasado: en cada fecha de corte, para cada cliente que ya compró, calcula rasgos con lo que se sabía
 hasta ese día y mira si compró en los 30 días siguientes. Con esas fotos entrena y compara:
   · referencia A: más días sin comprar primero (la que propone ChatGPT)
@@ -13,7 +13,7 @@ Separación temporal: entrena con cortes hasta FIN_TRAIN y evalúa con los corte
 Métrica principal: aciertos en el top 10 por corte (lo que entra en la portada). También AUC.
 
 Uso: python3 -I laboratorio/red_recompra.py [--loki ruta] [--json salida.json]   (prueba hacia atrás, no escribe)
-     python3 -I laboratorio/red_recompra.py pronosticar [--hoy AAAA-MM-DD]       (guarda la lista de hoy en nn_pronostico)
+     python3 -I laboratorio/red_recompra.py pronosticar [--hoy AAAA-MM-DD]       (guarda la lista de hoy en red_pred)
 Límite conocido: las NC se aplican con lo que se sabe hoy (no hay fecha de disponibilidad), así que la evaluación es
 retrospectiva y algo optimista. El CRM no guarda historia de estados, por eso no entra al entrenamiento.
 """
@@ -166,11 +166,11 @@ def top10(filas, puntaje):
 
 
 COLS_P = ['corte', 'cuit', 'politica', 'puesto', 'puntaje', 'dias_ult', 'ciclo', 'proxima', 'excluida', 'version', 'calculado']
-TABLA_P = 'nn_pronostico'
+TABLA_P = 'red_pred'  # antes nn_pronostico (renombrada 24/11, acuerdo en el buzón)
 
 
 def pronosticar(db, hoy):
-    """Guarda la lista de hoy de cada política en nn_pronostico (tabla propia, DEC-1124a). Una corrida por día:
+    """Guarda la lista de hoy de cada política en red_pred (tabla propia, DEC-1124a). Una corrida por día:
     si ya hay filas de ese corte y versión, se reemplazan. Se mide a los 30 días contra limpia_compras_firmes."""
     compras = leer(db)
     excl = {r[0] for r in db.run([('SELECT cuit FROM cue_cuentas WHERE trabajar = 0 AND cuit IS NOT NULL', [])])[0][1]}
