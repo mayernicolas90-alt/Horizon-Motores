@@ -26,8 +26,8 @@
   },
   "recompra.py": {
    "origen": "24/11: motor del datacenter sobre compras limpias (antes v3.1 sobre R10 crudo; comparación en el commit)",
-   "huella": "32627abf940b",
-   "version": "4.0",
+   "huella": "577ecc5071ea",
+   "version": "4.1",
    "test": [
     "--autotest"
    ]
@@ -76,16 +76,16 @@
   },
   "dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "176003f9dd72",
-   "version": "0.4",
+   "huella": "5c919ad851ce",
+   "version": "0.5",
    "test": [
     "--autotest"
    ]
   },
   "auditor.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/c)",
-   "huella": "114ef09e91c9",
-   "version": "0.3",
+   "huella": "ba4310f78651",
+   "version": "0.4",
    "test": [
     "--autotest"
    ]
@@ -94,6 +94,14 @@
    "origen": "nuevo 24/11 (motor Cuentas del datacenter, regla D07)",
    "huella": "8299599abe3e",
    "version": "0.1",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "puntaje.py": {
+   "origen": "nuevo 24/11 (motor Puntaje del datacenter, reglas V143 del CRM)",
+   "huella": "eedbb74829a1",
+   "version": "0.2",
    "test": [
     "--autotest"
    ]

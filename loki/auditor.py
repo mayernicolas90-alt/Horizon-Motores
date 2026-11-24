@@ -18,7 +18,7 @@ Uso (python3 -I): auditor.py correr --corrida N [--loki ruta] · auditor.py --co
 """
 import csv, datetime as D, importlib.util, io, json, os, re, sys
 
-VERSION = 'auditor 0.3 · 2026-11-24'
+VERSION = 'auditor 0.4 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 EMPRESA = 'HORIZON TRADING S.A.'
 CONTRATO = {'id': 'auditor', 'nombre': 'Auditor', 'disparo': 'cada corrida', 'lee': ['*'], 'escribe': ['aud_resultados'],
@@ -134,7 +134,23 @@ def controles_cuentas(db, R):
     R('C6', 'trabajar coincide con el estado', 'PASA' if not mal else 'FALLA', f'{mal} filas incoherentes')
 
 
-CONTROLES = {'limpieza': controles_limpieza, 'recompra': controles_recompra, 'cuentas': controles_cuentas}
+def controles_puntaje(db, R):
+    n, d = uno(db, 'SELECT count(*) FROM pun_fichas'), uno(db, 'SELECT count(DISTINCT crm_id) FROM pun_fichas')
+    R('P1', 'una fila por ficha', 'PASA' if n == d and n else 'FALLA', f'{n} filas · {d} fichas')
+    fuera = uno(db, 'SELECT count(*) FROM pun_fichas WHERE s IS NOT NULL AND (s < 0 OR s > 100 OR s_sin_monto < 0 OR s_sin_monto > s)')
+    R('P2', 'puntajes entre 0 y 100 (sin monto ≤ con monto)', 'PASA' if not fuera else 'FALLA', f'{fuera} fuera de rango')
+    exc = uno(db, "SELECT count(*) FROM pun_fichas p JOIN cue_cuentas c ON c.crm_id = p.crm_id WHERE c.trabajar = 0 AND p.s IS NOT NULL")
+    R('P3', 'las cuentas que no se trabajan no tienen puntaje', 'PASA' if not exc else 'FALLA', f'{exc} con puntaje')
+    sf = uno(db, "SELECT count(*) FROM pun_fichas WHERE funding = 'sin_fondos' AND s > 12")
+    R('P4', 'sin fondos: tope 12', 'PASA' if not sf else 'FALLA', f'{sf} arriba del tope')
+    ev = uno(db, 'SELECT count(*) FROM pun_fichas WHERE evidencia = 0 AND s > 28')
+    R('P5', 'sin evidencia de compra: tope 28', 'PASA' if not ev else 'FALLA', f'{ev} arriba del tope')
+    falta = uno(db, "SELECT count(*) FROM crm WHERE coleccion = 'oportunidades' AND id NOT IN (SELECT crm_id FROM pun_fichas) "
+                    "AND coalesce(json_extract(data, '$.archivada'), 0) IN (0, 'false', '')")
+    R('P6', 'toda ficha activa del CRM está evaluada', 'PASA' if not falta else 'FALLA', f'{falta} fichas sin evaluar')
+
+
+CONTROLES = {'limpieza': controles_limpieza, 'recompra': controles_recompra, 'cuentas': controles_cuentas, 'puntaje': controles_puntaje}
 
 
 def correr(corrida, loki_ruta=None):

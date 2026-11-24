@@ -19,7 +19,7 @@ Uso (python3 -I): recompra.py --contrato · recompra.py --autotest · recompra.p
 """
 import datetime as D, importlib.util, json, os, re, statistics, sys
 
-VERSION = 'recompra 4.0 · 2026-11-24'
+VERSION = 'recompra 4.1 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 NOPROS = ['pogliotti', 'itsa', 'amma', 'mutual mercantil', 'obercom', 'wiltel', 'gigared', 'astesano', 'generaci', 'itc comunic',
           'ax internet', 'fibrazo', 'tv music', 'support internet', 'itelsa', 'comworks',
@@ -39,7 +39,29 @@ CONTRATO = {'id': 'recompra', 'nombre': 'Recompra', 'disparo': 'finnegans', 'lee
             'que_hace': 'Ciclo de compra por cliente y SKU sobre las compras limpias: le toca, atrasado, se fue, reemplazo.'}
 COLS_SKU = ['cuit', 'cliente', 'sku', 'ultimo_modelo', 'linea', 'compras', 'primera', 'ultima', 'dias_desde_ultima', 'ciclo_dias',
             'proxima', 'cant_prom', 'cant_ult', 'cant_total', 'estado', 'excluida']
-COLS_CLI = ['cuit', 'cliente', 'estado', 'foco_sku', 'ciclo_dias', 'ultima', 'proxima', 'skus', 'skus_le_toca', 'skus_atrasados', 'excluida', 'calculado']
+COLS_CLI = ['cuit', 'cliente', 'estado', 'foco_sku', 'ciclo_dias', 'ultima', 'proxima', 'skus', 'skus_le_toca', 'skus_atrasados', 'excluida', 'calculado',
+            'estado_global', 'ciclo_global', 'proxima_global']
+# 4.1: ciclo global del cliente (compra «algo» de reposición cada N días), con la regla del patrón de compra de la página del CRM:
+# sin equipos de inversión (OLT, placas, switches…), fechas de los últimos 730 días, al menos 3, mediana entre 7 y 365 días.
+INV = re.compile(r'^(OLT|PLACAS|SWITCH|CMTS|NOTEBOOKS?|SERVER|FUENTES|PARTES|INFRAESTRUCTURA|EDFA|MULTIPLEXOR|ODF|UBR|INTERLOCKS|COMPONENTES|PRODUCTOS GBC)', re.I)
+INVP = re.compile(r'\b(OLT|AN5516|AN6000|MA56\d\d|EA5800|C300|C320|C600|PLACA|GPOA|GPHF|GPFD|GPSF|HSCA|PIBA|CIOA|SCUN|MPWC|SWITCH|S57\d\d|S67\d\d|NE8000|EDFA|ODF|CHASIS|RECTIFICADOR|ETP48)', re.I)
+
+
+def ciclo_global(fechas, hoy):
+    rec = sorted(f for f in set(fechas) if (hoy - f).days <= 730)
+    if not fechas:
+        return None, None, 'sin_patron'
+    ult = max(fechas)
+    if len(rec) < 3:
+        return None, None, 'dormido' if (hoy - ult).days > 365 else 'sin_patron'
+    gaps = sorted(g for g in ((b - a).days for a, b in zip(rec, rec[1:])) if g > 0)
+    g = gaps[len(gaps) // 2] if gaps else None
+    if not g or not 7 <= g <= 365:
+        return None, None, 'dormido' if (hoy - ult).days > 365 else 'sin_patron'
+    prox = rec[-1] + D.timedelta(days=g)
+    dias = (prox - hoy).days
+    est = 'en_ciclo' if dias > 7 else 'toca' if dias >= -max(7, round(g * .5)) else 'atrasado' if -dias <= g * 3 else 'inactivo'
+    return g, prox.isoformat(), est
 
 
 def fd(s):
@@ -62,7 +84,7 @@ def excluida(cli):
 def calcular(renglones, hoy):
     """renglones: dicts {cuit, cliente, fecha, tid, producto, marca, cantidad_neta} de compras firmes. Devuelve (skus, clientes)."""
     hoy = fd(hoy)
-    nombre, grupos, marca_de = {}, {}, {}
+    nombre, grupos, marca_de, glob = {}, {}, {}, {}
     for r in sorted(renglones, key=lambda r: (r['fecha'], int(re.sub(r'\D', '', str(r['tid'])) or 0))):
         prod, marca = (r['producto'] or '').strip(), (r['marca'] or '').strip()
         if not r['cuit'] or (r['cantidad_neta'] or 0) <= 0 or NOPROD.search(prod):
@@ -70,6 +92,8 @@ def calcular(renglones, hoy):
         lin = linea(marca, prod)
         fam = ('ONT FiberHome (cualquier modelo)' if lin == 'FiberHome' else 'ONU Huawei → reemplazo FH' if lin == 'Huawei' else prod) if ONT.search(prod) else prod
         nombre[r['cuit']] = (r['cliente'] or '').strip()
+        if not INV.search(str(r.get('subfamilia') or r.get('familia') or prod)) and not INVP.search(prod):
+            glob.setdefault(r['cuit'], []).append(fd(r['fecha']))
         marca_de[(r['cuit'], fam)] = marca
         grupos.setdefault((r['cuit'], fam, lin), []).append({'fecha': fd(r['fecha']), 'cant': float(r['cantidad_neta']), 'modelo': prod,
                                                              'switch': bool(SWITCH.search(prod))})
@@ -116,7 +140,8 @@ def calcular(renglones, hoy):
         clientes.append(dict(cuit=cuit, cliente=f['cliente'], estado=f['estado'], foco_sku=f['sku'], ciclo_dias=f['ciclo_dias'],
                              ultima=max(s['ultima'] for s in ss), proxima=f['proxima'], skus=len(ss),
                              skus_le_toca=sum(s['estado'] == 'Le toca' for s in ss), skus_atrasados=sum(s['estado'] == 'Atrasado' for s in ss),
-                             excluida=f['excluida'], calculado=hoy.isoformat()))
+                             excluida=f['excluida'], calculado=hoy.isoformat(),
+                             **dict(zip(('ciclo_global', 'proxima_global', 'estado_global'), ciclo_global(glob.get(cuit, []), hoy)))))
     return skus, clientes
 
 
@@ -129,7 +154,7 @@ def loki(ruta=None):
 
 
 def leer(db):
-    cols, filas = db.run([("SELECT c.cuit, c.cliente, c.fecha, c.tid, r.producto, r.marca, r.cantidad_neta FROM limpia_renglones r "
+    cols, filas = db.run([("SELECT c.cuit, c.cliente, c.fecha, c.tid, r.producto, r.marca, r.familia, r.subfamilia, r.cantidad_neta FROM limpia_renglones r "
                            "JOIN limpia_comprobantes c ON c.tid = r.tid WHERE c.tipo = 'FA' AND r.clase = 'producto' AND r.cantidad_neta > 0.0001", [])])[0]
     return [dict(zip(cols, f)) for f in filas]
 
@@ -190,6 +215,9 @@ def autotest():
         ('otro vendedor queda calculado y marcado excluida', S('10')['excluida'] == 1),
         ('descuentos y cantidades anuladas no son compras', not any(s['sku'].startswith('Descuento') for s in skus) and S('2')['ultima'] == '2026-03-03'),
         ('resumen por cliente: el estado más urgente primero', next(c for c in cli if c['cuit'] == '1')['estado'] == 'Le toca'),
+        ('ciclo global: compra algo cada ~30 días aunque cada producto tenga 1 compra', (lambda c: c['ciclo_global'] == 30 and c['estado_global'] == 'toca')(
+            next(c for c in calcular([R('20', 'Cliente Z', f, p, 'FiberHome', 1) for f, p in (('2026-08-25', 'Drop'), ('2026-09-24', 'Caja FitDP'), ('2026-10-24', 'Cable ADSS'))], hoy)[1]))),
+        ('ciclo global sin equipos de inversión (OLT, placas)', next(c for c in calcular([R('21', 'Cliente W', f, 'OLT AN6000-2', 'FiberHome', 1) for f in ('2026-08-25', '2026-09-24', '2026-10-24')], hoy)[1])['estado_global'] == 'sin_patron'),
     ]
     for t, ok in casos:
         print(('  OK    ' if ok else '  FALLA ') + t)
