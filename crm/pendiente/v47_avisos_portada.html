@@ -1,0 +1,44 @@
+<style id="hz-v47-portada-css">
+.hz-sales-table .hz-sf-row{display:none!important}
+#hzAvisos .hz47-av{margin:8px 0 4px;font-size:13px;line-height:1.55}
+#hzAvisos .hz47-av ul{margin:4px 0 0;padding-left:18px}
+#hzAvisos .mas{color:var(--green);font-weight:700}#hzAvisos .menos{color:var(--bad);font-weight:700}#hzAvisos .ojo{color:var(--warn);font-weight:700}
+#hzAvisos .nota{color:var(--muted);font-size:11.5px;margin-top:6px}
+</style>
+<script id="hz-v47-portada">
+/* v47 (23/11/2026) · Portada con la carga de siempre (razones, ficha técnica, NM): sale la línea de Stockfish y avisos de cada fila.
+   Ese detalle pasa a la ficha, al desplegable «Avisos» (debajo de Compras): puntaje Stockfish con lo principal a favor y en contra,
+   cotización grande abierta, monto a revisar y cotizaciones vencidas que siguen vivas. */
+(function(){
+ if(window.hzV47p)return;window.hzV47p=true;
+ const E=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ function avisos(o){
+  const ojo=[];
+  try{const m=window.hzV45Tope&&window.hzV45Tope(o);if(m)ojo.push('Cotización '+(typeof fmtUSD==='function'?fmtUSD(m):'USD '+Math.round(m))+' abierta')}catch(_){}
+  try{if(window.hzV46Revisar&&window.hzV46Revisar(o).length)ojo.push('Revisar monto de cotización')}catch(_){}
+  try{const t=today();(typeof hzOpenDeals==='function'?hzOpenDeals(o):[]).forEach(c=>{if(c.vence&&c.vence<t){const d=Math.round((Date.parse(t)-Date.parse(c.vence))/864e5);ojo.push((c.numero||'Cotización')+': venció hace '+d+' días (sigue viva)')}})}catch(_){}
+  try{const r=typeof hzTechnicalRisk==='function'&&hzTechnicalRisk(o);if(r)ojo.push(r)}catch(_){}
+  const sf=window.hzSFOf&&window.hzSFOf(o);
+  (sf&&sf.al||[]).forEach(a=>{if(!ojo.includes(a))ojo.push(a)});
+  return {ojo,sf};
+ }
+ function pintar(){
+  const sh=document.getElementById('sheet');if(!sh||sh.hidden||typeof st==='undefined'||!st.cur||!st.cur.id)return;
+  const {ojo,sf}=avisos(st.cur);
+  let box=document.getElementById('hzAvisos');
+  if(!ojo.length&&!(sf&&sf.v!=null)){if(box)box.hidden=true;return}
+  if(!box){const ref=document.getElementById('hz-fin-hist');if(!ref)return;box=document.createElement('div');box.id='hzAvisos';box.className='section';ref.after(box)}
+  const abierto=!!box.querySelector('details[open]');
+  const f=(sf&&sf.f)||[],af=f.filter(x=>x[2]==='a favor').sort((a,b)=>b[1]-a[1]).slice(0,2),ec=f.filter(x=>x[2]==='en contra').sort((a,b)=>a[1]-b[1]).slice(0,2);
+  const li=a=>a.length?'<ul>'+a.join('')+'</ul>':'';
+  box.hidden=false;
+  box.innerHTML='<details class="hz-fin-hist"'+(abierto?' open':'')+'><summary>Avisos'+(ojo.length?' · '+ojo.length:'')+'</summary><div class="hz47-av">'
+   +li(ojo.map(x=>'<li class="ojo">'+E(x)+'</li>'))
+   +(sf&&sf.v!=null?'<div style="margin-top:6px"><b>Stockfish '+E(sf.v)+'</b>'+li(af.map(x=>'<li><span class="mas">+ '+E(x[0])+'</span> · '+E(x[3]||'')+'</li>').concat(ec.map(x=>'<li><span class="menos">− '+E(x[0])+'</span> · '+E(x[3]||'')+'</li>')))+'<div class="nota">Desglose completo en el panal · resume hechos, no es probabilidad</div></div>':'')
+   +'</div></details>';
+ }
+ if(typeof openSheet==='function'){const os=openSheet;openSheet=function(){const r=os.apply(this,arguments);setTimeout(()=>{try{pintar()}catch(e){console.warn('[v47] avisos',e)}},0);return r}}
+ const rd=render;
+ render=function(){const out=rd.apply(this,arguments);try{pintar()}catch(e){console.warn('[v47] avisos',e)}return out};
+})();
+</script>

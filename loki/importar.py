@@ -31,7 +31,7 @@ Uso:
 """
 import argparse, collections, csv, datetime as D, hashlib, json, os, re, sqlite3, sys, unicodedata
 
-VERSION = 'importar 0.2 · 2026-11-23'
+VERSION = 'importar 0.3 · 2026-11-24'
 EMPRESA = 'HORIZON TRADING S.A.'
 TOL_DESCUENTO = 0.05   # pedido vs. factura con descuento contado (Sampacho 19/11: 1.256 → 1.218,32)
 TABLAS = ('fuentes', 'comprobantes', 'renglones', 'vinculos_nc', 'revisar', 'faltan_renglones', 'pedidos')
@@ -58,6 +58,20 @@ def num(s):
         return float(str(s).replace(',', '.')) if s not in (None, '') else 0.0
     except ValueError:
         return 0.0
+
+
+# 0.3: sinónimos de columnas (el mismo reporte de Finnegans llega con nombres distintos según el formato o quién lo bajó)
+SINONIMOS = {'Fecha comprobante': ('Fecha comprobante', 'Fecha Comprobante', 'Fecha'),
+             'Nrodeidentificacion': ('Nrodeidentificacion', 'Nro de identificación', 'Nro. de identificación'),
+             'Motivodeanulacion': ('Motivodeanulacion', 'Motivo de anulación'),
+             'Subfamilia': ('Subfamilia', 'SubFamilia')}
+
+
+def col(r, nombre):
+    for k in SINONIMOS.get(nombre, (nombre,)):
+        if k in r and r[k] not in (None, ''):
+            return r[k]
+    return ''
 
 
 def leer_csv(p):
@@ -144,12 +158,11 @@ def main(argv=None):
         filas, sha = leer_csv(p)
         if not filas or 'TransaccionID' not in filas[0]:
             sys.exit(f'{p}: no tiene TransaccionID; no se puede usar como renglones')
-        fk = 'Fecha comprobante' if 'Fecha comprobante' in filas[0] else 'Fecha'
         nuevos = set()
         for r in filas:
             if (r.get('Empresa') or EMPRESA) != EMPRESA:
                 continue
-            f = (r.get(fk) or '')[:10]
+            f = col(r, 'Fecha comprobante')[:10]
             if f < a.desde:
                 continue
             tid = r['TransaccionID']
@@ -158,11 +171,11 @@ def main(argv=None):
             nuevos.add(tid)
             comp.setdefault(tid, dict(tid=tid, fecha=f, tipo=tipo_doc(r.get('Documento')), documento=r.get('Documento'),
                                       comprobante=r.get('Comprobante'), cliente=(r.get('Cliente') or '').strip(),
-                                      cuit=dig(r.get('Nrodeidentificacion')), descripcion=r.get('Descripción') or '',
-                                      motivo=r.get('Motivodeanulacion') or '', fuente=os.path.basename(p)))
+                                      cuit=dig(col(r, 'Nrodeidentificacion')), descripcion=r.get('Descripción') or '',
+                                      motivo=col(r, 'Motivodeanulacion'), fuente=os.path.basename(p)))
             lineas[tid].append(dict(producto=r.get('Producto') or '', cantidad=num(r.get('Cantidad')), marca=r.get('Marca') or '',
-                                    familia=r.get('Familia') or '', subfamilia=r.get('Subfamilia') or '', moneda=r.get('Moneda') or ''))
-        fechas = [(r.get(fk) or '')[:10] for r in filas if r.get(fk)]
+                                    familia=r.get('Familia') or '', subfamilia=col(r, 'Subfamilia'), moneda=r.get('Moneda') or ''))
+        fechas = [col(r, 'Fecha comprobante')[:10] for r in filas if col(r, 'Fecha comprobante')]
         corte = max(fechas) if fechas else None
         if i == 0:
             corte_renglones = corte
@@ -318,6 +331,16 @@ def main(argv=None):
     # 7. pedidos sin factura
     if a.pedidos and cab:
         ped, sha = leer_csv(a.pedidos)
+        if ped and 'Nro comp' not in ped[0] and 'Comprobante' in ped[0]:
+            # 0.3: pedidos por renglón (R24): un pedido = suma de sus renglones de Horizon
+            g = {}
+            for r in ped:
+                if (r.get('Empresa') or EMPRESA) != EMPRESA or not r.get('Comprobante'):
+                    continue
+                x = g.setdefault(r['Comprobante'], {'Nro comp': r['Comprobante'], 'Fecha': r.get('Fecha', ''), 'Cliente': r.get('Cliente', ''),
+                                                     'Bruto': 0.0, 'Nombreusuarioalta': r.get('Nombreusuarioalta', '')})
+                x['Bruto'] += num(r.get('Bruto'))
+            ped = list(g.values())
         fs = [r['Fecha'][:10] for r in ped]
         db.execute('INSERT INTO fuentes VALUES(?,?,?,?,?,?,?)', ('pedidos', os.path.basename(a.pedidos), sha, len(ped), min(fs), max(fs), 'pendientes'))
         fac = collections.defaultdict(list)
@@ -412,6 +435,45 @@ def subir_turso(base, loki=None):
     print('  Turso: ' + ' · '.join(f'limpia_{t} {v}' for t, v in n.items()))
 
 
+# ---------------------------------------------------------------- motor del datacenter (DEC-1124a)
+CONTRATO = {'id': 'limpieza', 'nombre': 'Limpieza', 'disparo': 'finnegans',
+            'lee': ['archivos:R10.csv', 'archivos:R23.csv', 'archivos:R24.csv'],
+            'escribe': ['limpia_' + t for t in TABLAS] + ['limpia_compras_firmes'],
+            'que_hace': 'Facturación limpia: NC vinculadas a su factura, duplicados, anticipos y diferencias de cambio fuera, pedidos sin factura.'}
+
+
+def contrato():
+    return dict(CONTRATO, version=VERSION)
+
+
+def correr_desde_turso(loki=None):
+    """Lee los reportes crudos de la tabla archivos de Turso (R10 renglones, R23 cabecera, R24 pedidos por renglón),
+    arma la base limpia y la sube como limpia_*. Devuelve el resumen."""
+    import importlib.util, tempfile
+    ruta = loki or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'loki_sql.py')
+    sp = importlib.util.spec_from_file_location('loki_sql', ruta)
+    L = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(L)
+    db = L.conectar()
+    d = tempfile.mkdtemp()
+    rutas = {}
+    for n in ('R10.csv', 'R23.csv', 'R24.csv'):
+        filas = db.run([('SELECT texto FROM archivos WHERE nombre=?', [n])])[0][1]
+        if filas and filas[0][0]:
+            rutas[n] = os.path.join(d, n)
+            open(rutas[n], 'w', encoding='utf-8').write(filas[0][0])
+    db.close()
+    if 'R10.csv' not in rutas:
+        raise SystemExit('FALLA: falta R10.csv (facturación por renglón) en la tabla archivos')
+    argv = ['--base', os.path.join(d, 'limpia.sqlite'), '--renglones', rutas['R10.csv'], '--subir-turso', '--loki', ruta]
+    if 'R23.csv' in rutas:
+        argv += ['--cabecera', rutas['R23.csv']]
+        if 'R24.csv' in rutas:
+            argv += ['--pedidos', rutas['R24.csv']]
+    res = main(argv)
+    return {k: v for k, v in res.items()}
+
+
 # ---------------------------------------------------------------- autotest (sin datos reales)
 def autotest():
     import tempfile
@@ -486,6 +548,24 @@ def autotest():
                 for t in ('comprobantes', 'vinculos_nc', 'pedidos')) and \
         a_.execute('SELECT count(*) FROM renglones').fetchone() == b_.execute('SELECT count(*) FROM renglones').fetchone()
     casos.append(('subir dos veces el mismo archivo no duplica nada', igual))
+    # 0.3: mismo reporte con nombres de columna del formato R10 y pedidos por renglón (R24)
+    RC2 = [{'Nrodeidentificacion': 'Nro de identificación', 'Motivodeanulacion': 'Motivo de anulación', 'Subfamilia': 'SubFamilia',
+            'Fecha': 'Fecha Comprobante'}.get(c, c) for c in RC]
+    r2 = esc('ren2.csv', RC2, ren)
+    ped2 = esc('ped2.csv', ['Fecha', 'Comprobante', 'Cliente', 'Bruto', 'Producto', 'Empresa'], [
+        ['2026-10-19', 'P-1', 'Cliente Y', '60', 'Ont B', H], ['2026-10-19', 'P-1', 'Cliente Y', '40', 'Ont B', H],
+        ['2026-11-10', 'P-9', 'Cliente Y', '5', 'Ont B', 'SUR TECHNOLOGY S.A.']])
+    base3 = os.path.join(d, 'b3.sqlite')
+    with contextlib.redirect_stdout(io.StringIO()):
+        main(['--base', base3, '--renglones', r2, '--cabecera', cab, '--pedidos', ped2])
+    c3 = sqlite3.connect(base3)
+    casos.append(('columnas con otro nombre (formato R10) dan el mismo resultado',
+                  c3.execute('SELECT tid, cuit, fecha FROM comprobantes ORDER BY 1').fetchall() == a_.execute('SELECT tid, cuit, fecha FROM comprobantes ORDER BY 1').fetchall()
+                  and c3.execute("SELECT coalesce(sum(cantidad_neta),0) FROM compras_firmes WHERE tid='9'").fetchone()[0] == 6))
+    casos.append(('pedidos por renglón se agrupan por comprobante (solo Horizon)',
+                  c3.execute("SELECT estado FROM pedidos WHERE nro='P-1'").fetchone() == ('facturado',)
+                  and c3.execute("SELECT count(*) FROM pedidos WHERE nro='P-9'").fetchone()[0] == 0))
+    c3.close()
     ok = sum(1 for _, c in casos if c)
     for t, c in casos:
         print(('  OK   ' if c else '  FALLA ') + t)
@@ -496,4 +576,11 @@ def autotest():
 if __name__ == '__main__':
     if '--autotest' in sys.argv:
         sys.exit(autotest())
+    if '--contrato' in sys.argv:
+        print(json.dumps(contrato(), ensure_ascii=False))
+        sys.exit(0)
+    if sys.argv[1:2] == ['correr']:
+        r = correr_desde_turso(next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == '--loki'), None))
+        print('RESUMEN ' + json.dumps(r, ensure_ascii=False))
+        sys.exit(0)
     main()

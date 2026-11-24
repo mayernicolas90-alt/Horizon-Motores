@@ -66,8 +66,24 @@
   },
   "importar.py": {
    "origen": "nuevo 23/11 (probado contra los reportes de Finnegans del 16-20/11 y la base de Loki)",
-   "huella": "6c4ca3ddedfd",
-   "version": "0.2",
+   "huella": "59e496094830",
+   "version": "0.3",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "dc.py": {
+   "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
+   "huella": "822d38d6278d",
+   "version": "0.1",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "auditor.py": {
+   "origen": "nuevo 24/11 (datacenter, DEC-1124a/c)",
+   "huella": "c91499ec9ca6",
+   "version": "0.1",
    "test": [
     "--autotest"
    ]
