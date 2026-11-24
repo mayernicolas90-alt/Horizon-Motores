@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""auditor.py 0.1 · Auditor del datacenter de Loki (24/11/2026, DEC-1124a/c).
+"""auditor_dc.py · Auditor de las corridas del datacenter de Loki (antes auditor.py; renombrado el 24/11 para convivir con
+auditor.py, la puerta de entrada de reportes del PR #12). Auditor del datacenter de Loki (24/11/2026, DEC-1124a/c).
 
 Revisa lo que entra y lo que sale de cada motor, con código propio (no importa ningún motor).
 Solo escribe en su tabla aud_resultados: nunca modifica datos.
@@ -14,7 +15,7 @@ Controles de Limpieza:
   L6 sin precios ni importes en los renglones · L7 datos con menos de 10 días · L8 NC a revisar de cuentas propias
   L9 comprobantes de cuentas propias sin renglones
 
-Uso (python3 -I): auditor.py correr --corrida N [--loki ruta] · auditor.py --contrato · auditor.py --autotest
+Uso (python3 -I): auditor_dc.py correr --corrida N [--loki ruta] · auditor_dc.py --contrato · auditor_dc.py --autotest
 """
 import csv, datetime as D, importlib.util, io, json, os, re, sys
 
@@ -219,7 +220,7 @@ def autotest():
     """)
     c.commit(); c.close()
     env = dict(os.environ, LOKI_SQL_LOCAL=base)
-    run = lambda n: subprocess.run([sys.executable, '-X', 'utf8', os.path.join(AQUI, 'auditor.py'), 'correr', '--corrida', str(n), '--loki', os.path.join(d, 'loki_sql.py')],
+    run = lambda n: subprocess.run([sys.executable, '-X', 'utf8', os.path.join(AQUI, 'auditor_dc.py'), 'correr', '--corrida', str(n), '--loki', os.path.join(d, 'loki_sql.py')],
                                    capture_output=True, text=True, env=env)
     a1 = run(1)
     a2 = run(2)

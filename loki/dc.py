@@ -13,7 +13,7 @@ El orquestador:
   3. saltea un motor si sus tablas de entrada no cambiaron desde su última corrida buena (salvo --forzar);
   4. antes y después de cada motor cuenta las filas de todas las tablas: si cambió una que no está en su contrato,
      la corrida queda FUERA DE CONTRATO;
-  5. después de cada motor corre el auditor (auditor.py), que deja sus controles en aud_resultados;
+  5. después de cada motor corre el auditor (auditor_dc.py), que deja sus controles en aud_resultados;
   6. registra todo en dc_corridas.
 Solo el orquestador escribe dc_motores y dc_corridas.
 
@@ -28,7 +28,7 @@ import datetime as D, hashlib, importlib.util, json, os, subprocess, sys
 VERSION = 'dc 0.6 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 MOTORES = ['importar.py', 'recompra.py', 'cuentas.py', 'puntaje.py', 'portada.py']   # en orden: un motor solo lee lo que dejaron los anteriores
-AUDITOR = 'auditor.py'
+AUDITOR = 'auditor_dc.py'
 PROPIAS = ('dc_motores', 'dc_corridas')
 DDL = ["CREATE TABLE IF NOT EXISTS dc_motores(id TEXT PRIMARY KEY, nombre TEXT, version TEXT, disparo TEXT, lee TEXT, escribe TEXT, "
        "archivo TEXT, que_hace TEXT, actualizado TEXT)",
@@ -180,7 +180,7 @@ def autotest():
             "db=L.conectar(); db.run([('CREATE TABLE IF NOT EXISTS %s(x)',[]),('INSERT INTO %s VALUES(1)',[])%s]); print('RESUMEN {\"ok\":1}')\n"
     open(os.path.join(d, 'm_bueno.py'), 'w').write(bueno % ('bueno', 'sal_bueno', 'sal_bueno', 'sal_bueno', ''))
     open(os.path.join(d, 'm_malo.py'), 'w').write(bueno % ('malo', 'sal_malo', 'sal_malo', 'sal_malo', ",('INSERT INTO ajena VALUES(2)',[])"))
-    open(os.path.join(d, 'auditor.py'), 'w').write("import sys\nprint('AUDITOR PASA · juguete')\n")
+    open(os.path.join(d, 'auditor_dc.py'), 'w').write("import sys\nprint('AUDITOR PASA · juguete')\n")
     shutil.copy(os.path.abspath(__file__), os.path.join(d, 'dc.py'))
     env = dict(os.environ, LOKI_SQL_LOCAL=base)
     def dc(*a, motores=('m_bueno.py',)):

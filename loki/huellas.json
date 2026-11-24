@@ -82,14 +82,6 @@
     "--autotest"
    ]
   },
-  "auditor.py": {
-   "origen": "nuevo 24/11 (datacenter, DEC-1124a/c)",
-   "huella": "407190d1e763",
-   "version": "0.5",
-   "test": [
-    "--autotest"
-   ]
-  },
   "cuentas.py": {
    "origen": "nuevo 24/11 (motor Cuentas del datacenter, regla D07)",
    "huella": "8299599abe3e",
@@ -118,6 +110,14 @@
    "origen": "nuevo 24/11 (Publicador del datacenter, DEC-1124c/f)",
    "huella": "b94e5ccea3b4",
    "version": "0.2",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "auditor_dc.py": {
+   "origen": "nuevo 24/11 (datacenter, DEC-1124a/c) · renombrado a auditor_dc.py (24/11)",
+   "huella": "407190d1e763",
+   "version": "0.5",
    "test": [
     "--autotest"
    ]
