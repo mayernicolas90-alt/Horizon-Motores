@@ -31,7 +31,7 @@ Uso:
 """
 import argparse, collections, csv, datetime as D, hashlib, json, os, re, sqlite3, sys, unicodedata
 
-VERSION = 'importar 0.3 · 2026-11-24'
+VERSION = 'importar 0.4 · 2026-11-24'
 EMPRESA = 'HORIZON TRADING S.A.'
 TOL_DESCUENTO = 0.05   # pedido vs. factura con descuento contado (Sampacho 19/11: 1.256 → 1.218,32)
 TABLAS = ('fuentes', 'comprobantes', 'renglones', 'vinculos_nc', 'revisar', 'faltan_renglones', 'pedidos')
@@ -260,51 +260,68 @@ def main(argv=None):
         quedan = sum(f['neta'] for f in lineas[fa_tid] if f['clase'] in ('producto', 'anticipo'))
         return 'total' if quedan <= 0.0001 else 'parcial', resto
 
-    ncs = sorted((t for t, c in comp.items() if c['tipo'] == 'NC'), key=lambda t: comp[t]['fecha'])
-    for t in ncs:
-        c = comp[t]
-        prod = [l for l in lineas[t] if l['clase'] in ('producto', 'anticipo')]
-        ov = int(bool(OTROS.search(c['cliente'])))
-        # a) referencia escrita
-        cand = []
+    def refs(t):
+        c, cand = comp[t], []
         for pv, n in refs_factura(c['descripcion']):
             for fpv, ft in por_nro.get((c['cuit'], n), []):
                 if pv is None or pv == fpv:
                     cand.append(ft)
-        cand = list(dict.fromkeys(cand))
+        return list(dict.fromkeys(cand))
+
+    def vincular(t, ft, metodo, prod, ov):
+        alc, resto = descontar(t, ft) if prod else ('importe', 0)
+        db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, ft, metodo, alc))
+        resumen['NC por ' + metodo] += 1
+        if resto > 0.0001:   # 0.4: la NC no entra completa en lo que queda de su factura (ya estaba anulada): no se pierde, se avisa
+            db.execute('INSERT INTO revisar VALUES(?,?,?,?,?,?)', (t, comp[t]['fecha'], comp[t]['cliente'], 'NC excede lo que queda de la factura',
+                       f'sobran {resto:g} unidades · {comp[t]["descripcion"][:60]}', ov))
+            resumen['NC que exceden su factura'] += 1
+
+    # 0.4: primero las NC que citan su factura (en orden de fecha) y después las demás: una NC sin referencia
+    # no puede quedarse con la factura que otra NC cita (caso Frappa 22/06: dos facturas iguales y dos NC).
+    todas = sorted((t for t, c in comp.items() if c['tipo'] == 'NC'), key=lambda t: comp[t]['fecha'])
+    con_ref = [t for t in todas if len(refs(t)) == 1]
+    for t in con_ref + [t for t in todas if t not in set(con_ref)]:
+        c = comp[t]
+        prod = [l for l in lineas[t] if l['clase'] in ('producto', 'anticipo')]
+        ov = int(bool(OTROS.search(c['cliente'])))
+        # a) referencia escrita
+        cand = refs(t)
         if len(cand) == 1:
-            alc, _ = descontar(t, cand[0]) if prod else ('importe', 0)
-            db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, cand[0], 'referencia', alc))
-            resumen['NC por referencia'] += 1
+            vincular(t, cand[0], 'referencia', prod, ov)
             continue
         if not prod:
             resumen['NC solo de importe (descuento o ajuste)'] += 1
             db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, None, 'solo importe', 'importe'))
             continue
         # b) mismo cliente, producto y cantidad
-        def alcanza(ft):
-            disp = collections.Counter()
+        need = collections.Counter()
+        for l in prod:
+            need[l['producto_n']] += abs(l['cantidad'])
+        def disp(ft):
+            d = collections.Counter()
             for f in lineas[ft]:
-                disp[f['producto_n']] += f['neta']
-            need = collections.Counter()
-            for l in prod:
-                need[l['producto_n']] += abs(l['cantidad'])
-            return all(disp[k] >= v - 0.0001 for k, v in need.items())
-        cand = [ft for ft in facturas if comp[ft]['cuit'] == c['cuit'] and comp[ft]['fecha'] <= c['fecha'] and alcanza(ft)]
+                if f['clase'] in ('producto', 'anticipo'):
+                    d[f['producto_n']] += f['neta']
+            return d
+        cand = [ft for ft in facturas if comp[ft]['cuit'] == c['cuit'] and comp[ft]['fecha'] <= c['fecha']
+                and all(disp(ft)[k] >= v - 0.0001 for k, v in need.items())]
         metodo = None
         if len(cand) == 1:
             metodo = 'producto y cantidad'
         elif len(cand) > 1:
             firmas = {tuple(sorted((f['producto_n'], f['neta']) for f in lineas[ft] if f['clase'] == 'producto')) for ft in cand}
+            exacta = [ft for ft in cand if all(abs(disp(ft)[k] - v) < 0.0001 for k, v in need.items())]
             if len(firmas) == 1:
                 # facturas idénticas: el resultado en cantidades es el mismo; se desempata por nombre exacto y luego la más vieja
                 exactos = [ft for ft in cand if {l['producto'] for l in prod} <= {f['producto'] for f in lineas[ft]}]
                 cand = sorted(exactos or cand, key=lambda ft: comp[ft]['fecha'])[:1]
                 metodo = 'facturas idénticas'
+            elif len(exacta) == 1:
+                # 0.4: una sola factura con exactamente la cantidad que anula la NC (caso Buena Onda 30/04: NC por 43 y una factura de 43)
+                cand, metodo = exacta, 'cantidad exacta'
         if metodo:
-            alc, _ = descontar(t, cand[0])
-            db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, cand[0], metodo, alc))
-            resumen['NC por ' + metodo] += 1
+            vincular(t, cand[0], metodo, prod, ov)
         else:
             db.execute('INSERT INTO revisar VALUES(?,?,?,?,?,?)', (t, c['fecha'], c['cliente'], 'NC sin factura clara',
                        f"{len(cand)} candidatas · {c['descripcion'][:60]}", ov))
@@ -566,6 +583,28 @@ def autotest():
                   c3.execute("SELECT estado FROM pedidos WHERE nro='P-1'").fetchone() == ('facturado',)
                   and c3.execute("SELECT count(*) FROM pedidos WHERE nro='P-9'").fetchone()[0] == 0))
     c3.close()
+    # 0.4: NC con referencia primero (Frappa) · desempate por cantidad exacta (Buena Onda) · NC que excede su factura
+    ren4 = [
+        ['41', '2026-06-22', FA, 'A-00005-00001619', 'Cliente F', '30-66666666-6', '', '', 'Chasis', '1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['42', '2026-06-22', FA, 'A-00005-00001620', 'Cliente F', '30-66666666-6', '', '', 'Chasis', '1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['43', '2026-06-22', NC, 'A-00005-00000390', 'Cliente F', '30-66666666-6', '', '', 'Chasis', '-1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['44', '2026-07-03', NC, 'A-00005-00000394', 'Cliente F', '30-66666666-6', 'NC Anula FC 1619', '', 'Chasis', '-1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['45', '2025-12-03', FA, 'A-00005-00001509', 'Cliente B', '30-77777777-7', '', '', 'Modem', '300', '', '', '', 'Dólares', H],
+        ['46', '2026-04-06', FA, 'A-00005-00001578', 'Cliente B', '30-77777777-7', '', '', 'Modem', '43', '', '', '', 'Dólares', H],
+        ['47', '2026-04-30', NC, 'A-00005-00000385', 'Cliente B', '30-77777777-7', '', '', 'Modem', '-43', '', '', '', 'Dólares', H],
+        ['48', '2026-05-01', FA, 'A-00005-00001580', 'Cliente Q', '30-88888888-8', '', '', 'Caja', '5', '', '', '', 'Dólares', H],
+        ['49', '2026-05-02', NC, 'A-00005-00000386', 'Cliente Q', '30-88888888-8', 'Anula FC 1580', '', 'Caja', '-8', '', '', '', 'Dólares', H],
+    ]
+    r4 = esc('ren4.csv', RC, ren4)
+    base4 = os.path.join(d, 'b4.sqlite')
+    with contextlib.redirect_stdout(io.StringIO()):
+        main(['--base', base4, '--renglones', r4])
+    c4 = sqlite3.connect(base4)
+    f4 = lambda tid: c4.execute('SELECT coalesce(sum(cantidad_neta),0) FROM compras_firmes WHERE tid=?', (tid,)).fetchone()[0]
+    casos.append(('NC que cita su factura va primero: dos facturas iguales y dos NC quedan anuladas las dos', f4('41') == 0 and f4('42') == 0))
+    casos.append(('desempate por cantidad exacta: la NC de 43 anula la factura de 43', f4('46') == 0 and f4('45') == 300))
+    casos.append(('NC que excede lo que queda de su factura va a revisar', c4.execute("SELECT count(*) FROM revisar WHERE tid='49' AND motivo LIKE 'NC excede%'").fetchone()[0] == 1))
+    c4.close()
     ok = sum(1 for _, c in casos if c)
     for t, c in casos:
         print(('  OK   ' if c else '  FALLA ') + t)

@@ -25,10 +25,12 @@
    ]
   },
   "recompra.py": {
-   "origen": "loki-sql/scripts/recompra.py",
-   "huella": "36c964918abd",
-   "version": "v3.1",
-   "test": []
+   "origen": "24/11: motor del datacenter sobre compras limpias (antes v3.1 sobre R10 crudo; comparación en el commit)",
+   "huella": "32627abf940b",
+   "version": "4.0",
+   "test": [
+    "--autotest"
+   ]
   },
   "auditar.py": {
    "origen": "loki-sql/scripts/auditar.py",
@@ -66,24 +68,24 @@
   },
   "importar.py": {
    "origen": "nuevo 23/11 (probado contra los reportes de Finnegans del 16-20/11 y la base de Loki)",
-   "huella": "59e496094830",
-   "version": "0.3",
+   "huella": "6145ba6d9d84",
+   "version": "0.4",
    "test": [
     "--autotest"
    ]
   },
   "dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "822d38d6278d",
-   "version": "0.1",
+   "huella": "4e79f2747bf1",
+   "version": "0.2",
    "test": [
     "--autotest"
    ]
   },
   "auditor.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/c)",
-   "huella": "c91499ec9ca6",
-   "version": "0.1",
+   "huella": "1badb6940237",
+   "version": "0.2",
    "test": [
     "--autotest"
    ]

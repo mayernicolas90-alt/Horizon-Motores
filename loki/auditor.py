@@ -18,7 +18,7 @@ Uso (python3 -I): auditor.py correr --corrida N [--loki ruta] · auditor.py --co
 """
 import csv, datetime as D, importlib.util, io, json, os, sys
 
-VERSION = 'auditor 0.1 · 2026-11-24'
+VERSION = 'auditor 0.2 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 EMPRESA = 'HORIZON TRADING S.A.'
 CONTRATO = {'id': 'auditor', 'nombre': 'Auditor', 'disparo': 'cada corrida', 'lee': ['*'], 'escribe': ['aud_resultados'],
@@ -84,7 +84,37 @@ def controles_limpieza(db, R):
     R('L9', 'comprobantes de cuentas propias sin renglones (desde 2025)', 'AVISO' if fr else 'PASA', '; '.join(f"{r['cliente'][:28]} {r['fecha']}" for r in fr) or 'ninguno')
 
 
-CONTROLES = {'limpieza': controles_limpieza}
+ESTADOS_REC = {'Le toca', 'Atrasado', 'Se fue', 'Reemplazo (ONU Huawei → FH)', 'Sin ciclo (1 compra)', 'En ciclo', 'Reemplazo (discontinuado)',
+               'Sin marca (revisar)', 'Otra marca', 'Ya migró a FH', 'Switch (campaña, fuera del motor)', 'Dormido'}
+URG = ['Le toca', 'Atrasado', 'Se fue', 'Reemplazo (ONU Huawei → FH)', 'Sin ciclo (1 compra)', 'En ciclo']
+
+
+def controles_recompra(db, R):
+    n, d = uno(db, 'SELECT count(*) FROM rec_sku'), uno(db, "SELECT count(*) FROM (SELECT DISTINCT cuit, sku FROM rec_sku)")
+    R('R1', 'una fila por cliente y SKU', 'PASA' if n == d and n else 'FALLA', f'{n} filas · {d} combinaciones')
+    falta = uno(db, "SELECT count(DISTINCT c.cuit) FROM limpia_renglones r JOIN limpia_comprobantes c ON c.tid=r.tid WHERE c.tipo='FA' AND r.clase='producto' "
+                    "AND r.cantidad_neta > 0.0001 AND c.cuit <> '' AND c.cuit NOT IN (SELECT cuit FROM rec_cliente)")
+    R('R2', 'todo cliente con compras firmes tiene recompra', 'PASA' if not falta else 'FALLA', f'{falta} clientes sin calcular')
+    mal = [r for r in q(db, 'SELECT cuit, sku, ultima, ciclo_dias, proxima, compras FROM rec_sku')
+           if (r['ciclo_dias'] is not None and (r['compras'] < 2 or r['ciclo_dias'] <= 0 or
+               r['proxima'] != (D.date.fromisoformat(r['ultima']) + D.timedelta(days=int(r['ciclo_dias']))).isoformat()))
+           or (r['ciclo_dias'] is None and r['compras'] >= 2)]
+    R('R3', 'ciclo y próxima compra coherentes', 'PASA' if not mal else 'FALLA', f'{len(mal)} filas incoherentes' + (f" (ej. {mal[0]['cuit']} {mal[0]['sku'][:30]})" if mal else ''))
+    raros = [r['estado'] for r in q(db, 'SELECT DISTINCT estado FROM rec_sku') if r['estado'] not in ESTADOS_REC]
+    R('R4', 'estados conocidos', 'PASA' if not raros else 'FALLA', ', '.join(raros) or 'todos conocidos')
+    fantasma = uno(db, "SELECT count(*) FROM rec_cliente k WHERE NOT EXISTS (SELECT 1 FROM limpia_renglones r JOIN limpia_comprobantes c ON c.tid=r.tid "
+                       "WHERE c.cuit=k.cuit AND c.tipo='FA' AND r.clase='producto' AND r.cantidad_neta > 0.0001 AND c.fecha >= k.ultima)")
+    R('R5', 'la última compra es una compra firme (no anulada)', 'PASA' if not fantasma else 'FALLA', f'{fantasma} clientes con última compra que no existe')
+    inc = 0
+    for k in q(db, 'SELECT cuit, estado FROM rec_cliente'):
+        es = [r['estado'] for r in q(db, 'SELECT estado FROM rec_sku WHERE cuit=?', [k['cuit']])]
+        mejor = min(es, key=lambda e: URG.index(e) if e in URG else 99)
+        if (URG.index(k['estado']) if k['estado'] in URG else 99) != (URG.index(mejor) if mejor in URG else 99):
+            inc += 1
+    R('R6', 'el resumen por cliente muestra su SKU más urgente', 'PASA' if not inc else 'FALLA', f'{inc} clientes con resumen distinto')
+
+
+CONTROLES = {'limpieza': controles_limpieza, 'recompra': controles_recompra}
 
 
 def correr(corrida, loki_ruta=None):
@@ -148,12 +178,28 @@ def autotest():
     c.execute("DELETE FROM limpia_comprobantes WHERE tid='2'"); c.execute("INSERT INTO limpia_comprobantes VALUES('9','2026-01-01','NC','Y')"); c.commit()
     a3 = run(1)
     escritas = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    # recompra: tablas sanas y después una última compra que no existe en las compras firmes
+    c.executescript(f"""
+     DELETE FROM limpia_comprobantes; INSERT INTO limpia_comprobantes VALUES('1','2026-10-01','FA','X');
+     ALTER TABLE limpia_comprobantes ADD COLUMN cuit; UPDATE limpia_comprobantes SET cuit='30';
+     INSERT INTO dc_corridas VALUES(3,'recompra','finnegans','','','OK','','','[]',NULL);
+     CREATE TABLE rec_sku(cuit, cliente, sku, ultimo_modelo, linea, compras, primera, ultima, dias_desde_ultima, ciclo_dias, proxima, cant_prom, cant_ult, cant_total, estado, excluida);
+     INSERT INTO rec_sku VALUES('30','X','Ont','Ont','FiberHome',2,'2026-09-01','2026-10-01',54,30,'2026-10-31',3,3,6,'Le toca',0);
+     CREATE TABLE rec_cliente(cuit, cliente, estado, foco_sku, ciclo_dias, ultima, proxima, skus, skus_le_toca, skus_atrasados, excluida, calculado);
+     INSERT INTO rec_cliente VALUES('30','X','Le toca','Ont',30,'2026-10-01','2026-10-31',1,1,0,0,'2026-11-24');
+    """)
+    c.commit()
+    a4 = run(3)
+    c.execute("UPDATE rec_cliente SET ultima='2026-11-15'"); c.commit()
+    a5 = run(3)
     c.close()
     casos = [
         ('datos sanos: PASA', 'AUDITOR PASA' in a1.stdout),
         ('escribir fuera de contrato: FALLA', 'AUDITOR FALLA' in a2.stdout and 'ventas' in a2.stdout),
         ('falta un comprobante del R10: FALLA en L2', 'FALLA L2' in a3.stdout),
         ('NC suelta: FALLA en L3', 'FALLA L3' in a3.stdout),
+        ('recompra sana: PASA', 'AUDITOR PASA' in a4.stdout and 'R3' in a4.stdout),
+        ('recompra con una última compra que no existe: FALLA en R5', 'FALLA R5' in a5.stdout),
         ('el auditor solo agrega su tabla', set(escritas) - {'archivos', 'dc_corridas', 'limpia_comprobantes', 'limpia_renglones', 'limpia_vinculos_nc',
                                                               'limpia_revisar', 'limpia_faltan_renglones'} == {'aud_resultados'}),
     ]
