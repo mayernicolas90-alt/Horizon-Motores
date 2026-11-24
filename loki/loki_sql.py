@@ -2,7 +2,9 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM FLgX se LEE (ArtifactData) y se copia acá.
-1.10.1 (22/11): cargar-continuidad exige `importante` no vacío y abrir no se cae si falta (una sesión la dejó en null).
+1.11.0 (23/11): la puerta de entrada. R4/R6/R7/R10/R15/R23 ya no se cargan con cargar-reporte: entran por loki/auditor.py
+        (recibir → clasificar → verificar → publicar con «hacelo»); abrir muestra CUARENTENA y lo verificado sin publicar.
+1.10.1 (22/11):cargar-continuidad exige `importante` no vacío y abrir no se cae si falta (una sesión la dejó en null).
 1.10.0 (22/11): conocimiento-cargar ARCHIVO.json: alta o cambio de filas de las tablas k_* (decisiones, reglas,
   procedimientos, fuentes, documentos) con columnas validadas, todo o nada. Antes no había cómo escribirlas desde Loki.
 1.9.1 (22/11): bajar/abrir bajan también bitacora2.py (antes el chequeo de la bitácora se hacía a mano). Loki vive en la nube.
@@ -62,7 +64,8 @@ BITÁCORA (escribe sin hacelo: aprobado por Nicolás 17/11; una fila por hecho, 
   loki_sql.py cerrar ID "cómo se cerró" [--chat N]
 CARGA (escribe en la base: solo con hacelo, salvo crm/continuidad que son parte del arranque y del cierre):
   loki_sql.py init
-  loki_sql.py cargar-reporte CODIGO ARCHIVO.csv META.json   (CODIGO registrado en `reportes`; el CSV en UTF-8)
+  loki_sql.py cargar-reporte CODIGO ARCHIVO.csv META.json   (CODIGO registrado en `reportes`; el CSV en UTF-8;
+                                                             R4/R6/R7/R10/R15/R23 no: entran por loki/auditor.py)
   loki_sql.py registrar-reporte META.json  alta o cambio de un código (codigo, descripcion, clase, privado, columnas)
   loki_sql.py bajar-reportes DIR           definiciones (Rnn.json) + último CSV de cada código + auditar.py, para auditar
   loki_sql.py reportes                     lista del registro con su última carga
@@ -96,7 +99,8 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.10.1"
+VERSION = "1.11.0"
+POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 6
 CRM_ARRANQUE = ('oportunidades', 'cotizaciones', 'muestras')
@@ -920,6 +924,15 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False):
             f"#{r['id']} {r['fecha'][5:]} {r['tema'][:50]}" for r in ult) if ult else ''))
     except Exception as e:  # noqa: BLE001
         print(f'BITÁCORA no disponible ({str(e)[:80]})')
+    try:   # 1.11.0: lo que el auditor dejó afuera se muestra hasta resolverlo (sin la tabla `entrada` no hay línea)
+        cua = q(db, "SELECT id, nombre, motivo FROM entrada WHERE estado='cuarentena' ORDER BY id")
+        pen = q(db, "SELECT lote, COUNT(*) n FROM entrada WHERE estado='verificada' AND codigo IS NOT NULL GROUP BY lote")
+        if cua:
+            print(f'CUARENTENA {len(cua)}: ' + ' · '.join(f"{c['id']} {c['nombre'][:28]} ({(c['motivo'] or '')[:90]})" for c in cua))
+        if pen:
+            print('VERIFICADO SIN PUBLICAR: ' + ' · '.join(f"lote {p['lote']} ({p['n']})" for p in pen) + ' · se carga con su «hacelo»')
+    except Exception:  # noqa: BLE001
+        pass
     try:
         if isinstance(ncrm, dict):
             g = gsd if gsd is not None else q(db, 'SELECT COUNT(*) n FROM v_ganadas_sin_despacho')[0]['n']
@@ -2424,6 +2437,9 @@ def main(argv):
         elif op == 'bajar':
             f, _ = bajar(db, a[0]); print(*(f or ['OK bajado']), sep='\n'); return 1 if f else 0
         elif op == 'cargar-reporte':
+            if a[0] in POR_AUDITOR:   # 1.11.0: la facturación y la cabecera entran solo por el auditor (verificadas)
+                print(f'RECHAZADO · {a[0]} entra por el auditor: python -I -X utf8 loki/auditor.py entrar <renglones> <cabecera>'
+                      ' y después publicar LOTE --hacelo "…"'); return 1
             print('OK', a[0], cargar_reporte(db, a[0], a[1], a[2]), 'filas')
         elif op == 'registrar-reporte':
             print('OK registrado', registrar_reporte(db, a[0]))
