@@ -19,7 +19,7 @@ Uso (python3 -I): auditor_dc.py correr --corrida N [--loki ruta] · auditor_dc.p
 """
 import csv, datetime as D, importlib.util, io, json, os, re, sys
 
-VERSION = 'auditor 0.5 · 2026-11-24'
+VERSION = 'auditor 0.6 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 EMPRESA = 'HORIZON TRADING S.A.'
 CONTRATO = {'id': 'auditor', 'nombre': 'Auditor', 'disparo': 'cada corrida', 'lee': ['*'], 'escribe': ['aud_resultados'],
@@ -131,7 +131,8 @@ def controles_cuentas(db, R):
     R('C4', 'conflictos entre fuentes para definir', 'AVISO' if con else 'PASA', '; '.join(f"{c['empresa']}: {c['conflicto'][:80]}" for c in con) or 'ninguno')
     falta = uno(db, "SELECT count(DISTINCT cuit) FROM limpia_comprobantes WHERE cuit <> '' AND cuit NOT IN (SELECT coalesce(cuit,'') FROM cue_cuentas)")
     R('C5', 'todo CUIT que compró tiene su cuenta', 'PASA' if not falta else 'FALLA', f'{falta} CUIT sin cuenta')
-    mal = uno(db, "SELECT count(*) FROM cue_cuentas WHERE (estado = 'trabajar') <> (trabajar = 1)")
+    # cuentas 0.2: la unificada hereda «trabajar» de su principal (puede valer 1); el resto tiene que coincidir con el estado
+    mal = uno(db, "SELECT count(*) FROM cue_cuentas WHERE estado <> 'unificada' AND (estado = 'trabajar') <> (trabajar = 1)")
     R('C6', 'trabajar coincide con el estado', 'PASA' if not mal else 'FALLA', f'{mal} filas incoherentes')
 
 

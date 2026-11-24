@@ -15,7 +15,7 @@ Uso (python3 -I): cuentas.py --contrato · cuentas.py --autotest · cuentas.py c
 """
 import importlib.util, json, os, re, sys, unicodedata
 
-VERSION = 'cuentas 0.1 · 2026-11-24'
+VERSION = 'cuentas 0.2 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 CONTRATO = {'id': 'cuentas', 'nombre': 'Cuentas', 'disparo': 'loki',
             'lee': ['k_regla', 'crm_oportunidad', 'cuentas', 'cliente_alias', 'limpia_comprobantes'], 'escribe': ['cue_cuentas'],
@@ -76,6 +76,8 @@ def calcular(regla, oportunidades, cuentas, alias, compradores):
             f['marcas'].append(('no_prospectar', 'CRM: no prospectar'))
         if (o.get('cuenta_compartida') or '') == 'si':
             f['compartida'] = 1
+        if o.get('unificada_en'):
+            f['unificada_en'] = o['unificada_en']
         if str(o.get('archivada') or '0') not in ('0', ''):
             f['marcas'].append(('unificada' if o.get('unificada_en') else 'archivada',
                                 'CRM: unificada en ' + o['unificada_en'] if o.get('unificada_en') else 'CRM: ficha archivada'))
@@ -116,6 +118,13 @@ def calcular(regla, oportunidades, cuentas, alias, compradores):
         f['motivo'] = '; '.join(dict.fromkeys(m[1] for m in f['marcas'])) + ('; D07: es de Nicolás' if propia else '')
         f['fuentes'] = ','.join(sorted(f['fuentes']))
         f['conflicto'] = ' · '.join(conflicto) or None
+    # 0.2: una ficha unificada es un duplicado: su CUIT compra y se trabaja como la ficha principal (24/11)
+    por_crm = {f['crm_id']: f for f in filas.values() if f.get('crm_id')}
+    for f in filas.values():
+        if f['estado'] == 'unificada':
+            p = por_crm.get(f.get('unificada_en'))
+            f['trabajar'] = p['trabajar'] if p and p['estado'] != 'unificada' else 0
+            f['motivo'] += f" · hereda de {f.get('unificada_en')}: {'se trabaja' if f['trabajar'] else 'no se trabaja'}"
     return [{k: f.get(k) for k in COLS} for f in sorted(filas.values(), key=lambda f: f['clave'])], R
 
 
@@ -179,7 +188,8 @@ def autotest():
         ('D07 «es de Nicolás» contra la marca del CRM: se trabaja y queda conflicto', F('305')['trabajar'] == 1 and 'D07 dice' in (F('305')['conflicto'] or '')),
         ('compartida se trabaja pero queda marcada', F('306')['compartida'] == 1 and F('306')['trabajar'] == 1 and not F('306')['conflicto']),
         ('compartida con nota «no es conflicto»: conflicto para definir', 'compartida' in (F('307')['conflicto'] or '')),
-        ('ficha unificada o archivada: no se trabaja', F('308')['estado'] == 'unificada' and F('crm:i')['estado'] == 'archivada'),
+        ('ficha unificada o archivada: estado propio', F('308')['estado'] == 'unificada' and F('crm:i')['estado'] == 'archivada'),
+        ('0.2: la unificada hereda «trabajar» de la principal; la archivada no se trabaja', F('308')['trabajar'] == 1 and F('crm:i')['trabajar'] == 0),
         ('«otro vendedor» escrito en cuentas cuenta', F('309')['estado'] == 'otro_vendedor'),
     ]
     for t, ok in casos:

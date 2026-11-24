@@ -83,9 +83,9 @@
    ]
   },
   "cuentas.py": {
-   "origen": "nuevo 24/11 (motor Cuentas del datacenter, regla D07)",
-   "huella": "8299599abe3e",
-   "version": "0.1",
+   "origen": "24/11: 0.2 = la ficha unificada hereda «trabajar» de la principal (acuerdo con el PM, PM-j punto 4)",
+   "huella": "9785fad29085",
+   "version": "0.2",
    "test": [
     "--autotest"
    ]
@@ -115,9 +115,9 @@
    ]
   },
   "auditor_dc.py": {
-   "origen": "nuevo 24/11 (datacenter, DEC-1124a/c) · renombrado a auditor_dc.py (24/11)",
-   "huella": "01e3031aee35",
-   "version": "0.5",
+   "origen": "24/11: 0.6 = C6 acepta que la ficha unificada herede «trabajar» (cuentas 0.2)",
+   "huella": "cfd66770d024",
+   "version": "0.6",
    "test": [
     "--autotest"
    ]

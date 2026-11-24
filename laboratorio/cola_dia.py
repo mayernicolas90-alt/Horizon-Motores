@@ -9,6 +9,7 @@ No repite la misma cuenta con la misma pregunta del día anterior. Las cuentas e
 vendedor, archivada) y las fichas archivadas no entran. Las ganadas no ocupan lugar de cotización ni de lead
 (su fecha vencida es posventa), pero sí entran como recompra y base FH.
 Lee crm (copia de 5SPm), red_pred, cue_cuentas, limpia_compras_firmes. Escribe solo cola_dia (DEC-1124a).
+Es la lista única del día (acuerdo con el PM, 24/11): cada corrida lleva `lote` (huella de las entradas) y `version_reglas`.
 La muestra `abrir` (sesión Loki); el resultado de cada contacto se carga en 5SPm con el «hacelo».
 Uso: python3 -I laboratorio/cola_dia.py correr [--hoy AAAA-MM-DD] · simular · --autotest
     Recompra: no se llama al que acaba de comprar. Entra recién cuando pasaron 15 días y el 70 % de su ciclo
@@ -16,9 +17,11 @@ Uso: python3 -I laboratorio/cola_dia.py correr [--hoy AAAA-MM-DD] · simular · 
 """
 import datetime as D, importlib.util, json, os, re, sys
 
-VERSION = 'cola_dia 0.1 · 2026-11-24'
+VERSION = 'cola_dia 0.2 · 2026-11-24'
+# reglas vigentes (acuerdo PM-i/PM-j): cupos 2/1/1/1, recompra con 15 días y 70 % del ciclo, sin repetir la pregunta de ayer
+REGLAS = 'cupos cotizacion2 recompra1 base_fh1 lead1 · recompra>=max(15d,0.7ciclo) · sin repetir pregunta · excluidas cue_cuentas'
 AQUI = os.path.dirname(os.path.abspath(__file__))
-COLS = ['dia', 'puesto', 'bloque', 'crm_id', 'cuenta', 'motivo', 'pregunta', 'dato_a_cargar', 'version', 'calculado']
+COLS = ['dia', 'puesto', 'bloque', 'crm_id', 'cuenta', 'motivo', 'pregunta', 'dato_a_cargar', 'version', 'calculado', 'lote', 'version_reglas']
 ABIERTAS = {'enviada', 'espera_aprobacion'}
 CERRADAS = {'ganado', 'perdido', 'archivado', 'descartado'}
 EXCL = ('no_prospectar', 'otro_vendedor', 'archivada')
@@ -178,9 +181,17 @@ if __name__ == '__main__':
         d = leer(db, hoy)
         filas = calcular(*d[:5], hoy, d[5])
         if a[0] == 'correr':
+            import hashlib
             ahora = D.datetime.now(D.timezone.utc).isoformat(timespec='seconds')
-            db.run([('CREATE TABLE IF NOT EXISTS cola_dia(' + ', '.join(COLS) + ')', []), ('DELETE FROM cola_dia WHERE dia = ?', [hoy.isoformat()])]
-                   + [('INSERT INTO cola_dia VALUES(' + ','.join('?' * len(COLS)) + ')', [f.get(c, ahora) if c != 'calculado' else ahora for c in COLS]) for f in filas])
+            # lote = huella de las entradas: copia del CRM, predicción de recompra, cuentas y compras limpias
+            ent = db.run([("SELECT (SELECT max(cargado) FROM cargas WHERE fuente LIKE 'crm:%'), (SELECT max(corte) FROM red_pred), "
+                           "(SELECT count(*) || '|' || coalesce(sum(trabajar),0) FROM cue_cuentas), (SELECT max(fecha) FROM limpia_compras_firmes)", [])])[0][1][0]
+            lote = hashlib.sha256(json.dumps(ent).encode()).hexdigest()[:12]
+            db.run([('CREATE TABLE IF NOT EXISTS cola_dia(' + ', '.join(COLS) + ')', [])])
+            tiene = {r[1] for r in db.run([('PRAGMA table_info(cola_dia)', [])])[0][1]}
+            db.run([(f'ALTER TABLE cola_dia ADD COLUMN {c}', []) for c in COLS if c not in tiene] + [('DELETE FROM cola_dia WHERE dia = ?', [hoy.isoformat()])]
+                   + [('INSERT INTO cola_dia(' + ', '.join(COLS) + ') VALUES(' + ','.join('?' * len(COLS)) + ')',
+                       [ahora if c == 'calculado' else lote if c == 'lote' else REGLAS if c == 'version_reglas' else f.get(c) for c in COLS]) for f in filas])
         db.close()
         for f in filas:
             print(f"{f['puesto']}. [{f['bloque']}] {f['cuenta']} · {f['motivo']}\n     → {f['pregunta']}  (cargar: {f['dato_a_cargar']})")
