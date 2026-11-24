@@ -19,7 +19,7 @@ DIR_CRM = salida de ArtifactData list (out_dir) de las colecciones comprasLimpia
 """
 import datetime as D, glob, hashlib, importlib.util, json, os, sys
 
-VERSION = 'publicador 0.1 · 2026-11-24'
+VERSION = 'publicador 0.2 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 MOTORES = ['limpieza', 'recompra', 'cuentas', 'puntaje', 'portada']
 OK_AUDITOR = {'PASA', 'AVISO'}                     # DEC-1124f: con AVISO también se publica (y se avisa)
@@ -35,8 +35,19 @@ def ahora():
     return D.datetime.now(D.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 
+def canon(x):
+    """0.2: 3.0 y 3 son el mismo número (la base del CRM guarda los enteros sin decimales)."""
+    if isinstance(x, float) and x.is_integer():
+        return int(x)
+    if isinstance(x, dict):
+        return {k: canon(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [canon(v) for v in x]
+    return x
+
+
 def huella(doc):
-    limpio = {k: v for k, v in doc.items() if k not in VOLATIL}
+    limpio = canon({k: v for k, v in doc.items() if k not in VOLATIL})
     return hashlib.sha256(json.dumps(limpio, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()[:16]
 
 
@@ -152,7 +163,8 @@ def verificar(dir_crm, salida, loki_ruta=None):
     ok, mal = [], []
     for c in man['cambios']:
         d = actual.get((c['collection'], c['doc_id']))
-        (ok if d is not None and huella(d) == c['sha'] else mal).append(c)
+        esperado = huella(json.load(open(c['file_path'], encoding='utf-8'))) if os.path.exists(c['file_path']) else c['sha']
+        (ok if d is not None and huella(d) == esperado else mal).append(c)
     db = loki(loki_ruta).conectar()
     t = ahora()
     db.run([('CREATE TABLE IF NOT EXISTS pub_envios(fecha TEXT, coleccion TEXT, doc_id TEXT, sha TEXT, estado TEXT, auditor TEXT)', [])]
@@ -207,7 +219,8 @@ def autotest():
     x = json.load(open(os.path.join(sal, 'docs', 'comprasLimpias', '301.json')))
     # «escribir» en el CRM simulado copiando los documentos preparados, y verificar
     for ch in man['cambios']:
-        p = os.path.join(crm, ch['collection'], ch['doc_id'] + '.json'); os.makedirs(os.path.dirname(p), exist_ok=True); shutil.copy(ch['file_path'], p)
+        p = os.path.join(crm, ch['collection'], ch['doc_id'] + '.json'); os.makedirs(os.path.dirname(p), exist_ok=True)
+        json.dump(canon(json.load(open(ch['file_path']))), open(p, 'w'))   # como la base del CRM: 10.0 vuelve como 10
     with contextlib.redirect_stdout(io.StringIO()) as o2:
         r2 = verificar(crm, sal, loki_ruta=os.path.join(d, 'loki_sql.py'))
     sal2 = os.path.join(d, 'sal2')

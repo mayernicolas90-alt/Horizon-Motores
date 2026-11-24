@@ -33,9 +33,19 @@ MANIFIESTO = os.path.expanduser('~/.cache/loki-publicador/manifiesto.json')
 VOLATIL = {'actualizado', 'generado'}
 
 
+def canon(x):
+    if isinstance(x, float) and x.is_integer():
+        return int(x)
+    if isinstance(x, dict):
+        return {k: canon(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [canon(v) for v in x]
+    return x
+
+
 def huella_archivo(p):
     d = json.load(open(p, encoding='utf-8'))
-    d = {k: v for k, v in d.items() if k not in VOLATIL}
+    d = canon({k: v for k, v in d.items() if k not in VOLATIL})
     return hashlib.sha256(json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()[:16]
 
 
