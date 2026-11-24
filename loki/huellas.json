@@ -63,6 +63,14 @@
    "test": [
     "--autotest"
    ]
+  },
+  "importar.py": {
+   "origen": "23/11: 0.2 + cuentas ajenas desde el CRM (--crm) y FALLA ante reporte incompleto; probado con el R10 del 20/11 (PASA) y el GIANNINA3 recortado del 23/11 (FALLA)",
+   "huella": "f3f1256ef715",
+   "version": "0.3",
+   "test": [
+    "--autotest"
+   ]
   }
  }
 }
