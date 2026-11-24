@@ -71,6 +71,19 @@
    "leccion": "L-procesar-una-vez"
   },
   {
+   "id": "C07",
+   "error": "La copia ventas y las tablas limpia_* podían separarse sin que nadie lo viera (paso 2 del datacenter)",
+   "fecha": "2026-11-24",
+   "tipo": "alerta",
+   "archivo": "controles/c07_ventas_limpias.py",
+   "corre": [
+    "ci",
+    "diario"
+   ],
+   "leccion": "L-procesar-una-vez",
+   "nota": "24/11 (hacelo de Nicolás): ventas es la fuente (R10 verificado por el auditor) y limpia_* derivadas; no pasa a vista porque las limpias no tienen importe ni pte_dest."
+  },
+  {
    "id": "G01",
    "error": "Se subió código de Loki al repositorio de la otra cuenta, o firmado por la otra cuenta",
    "fecha": "2026-11-21",
