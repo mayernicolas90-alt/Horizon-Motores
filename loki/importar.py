@@ -36,7 +36,7 @@ Uso:
 """
 import argparse, collections, csv, datetime as D, hashlib, json, os, re, sqlite3, sys, unicodedata
 
-VERSION = 'importar 0.3 · 2026-11-23'
+VERSION = 'importar 0.5 · 2026-11-24'   # 0.5 = 0.3 de la puerta de entrada (cuentas ajenas del CRM, FALLA si falta >2 %) + 0.4 del datacenter
 EMPRESA = 'HORIZON TRADING S.A.'
 TOL_DESCUENTO = 0.05   # pedido vs. factura con descuento contado (Sampacho 19/11: 1.256 → 1.218,32)
 TABLAS = ('fuentes', 'comprobantes', 'renglones', 'vinculos_nc', 'revisar', 'faltan_renglones', 'pedidos')
@@ -122,6 +122,20 @@ def num(s):
         return float(str(s).replace(',', '.')) if s not in (None, '') else 0.0
     except ValueError:
         return 0.0
+
+
+# 0.3: sinónimos de columnas (el mismo reporte de Finnegans llega con nombres distintos según el formato o quién lo bajó)
+SINONIMOS = {'Fecha comprobante': ('Fecha comprobante', 'Fecha Comprobante', 'Fecha'),
+             'Nrodeidentificacion': ('Nrodeidentificacion', 'Nro de identificación', 'Nro. de identificación'),
+             'Motivodeanulacion': ('Motivodeanulacion', 'Motivo de anulación'),
+             'Subfamilia': ('Subfamilia', 'SubFamilia')}
+
+
+def col(r, nombre):
+    for k in SINONIMOS.get(nombre, (nombre,)):
+        if k in r and r[k] not in (None, ''):
+            return r[k]
+    return ''
 
 
 def leer_csv(p):
@@ -212,12 +226,11 @@ def main(argv=None):
         filas, sha = leer_csv(p)
         if not filas or 'TransaccionID' not in filas[0]:
             sys.exit(f'{p}: no tiene TransaccionID; no se puede usar como renglones')
-        fk = 'Fecha comprobante' if 'Fecha comprobante' in filas[0] else 'Fecha'
         nuevos = set()
         for r in filas:
             if (r.get('Empresa') or EMPRESA) != EMPRESA:
                 continue
-            f = (r.get(fk) or '')[:10]
+            f = col(r, 'Fecha comprobante')[:10]
             if f < a.desde:
                 continue
             tid = r['TransaccionID']
@@ -228,11 +241,11 @@ def main(argv=None):
             AJ.aprender(r.get('Cliente'), cuit_r)
             comp.setdefault(tid, dict(tid=tid, fecha=f, tipo=tipo_doc(r.get('Documento')), documento=r.get('Documento'),
                                       comprobante=r.get('Comprobante'), cliente=(r.get('Cliente') or '').strip(),
-                                      cuit=dig(cuit_r), descripcion=r.get('Descripción') or '',
-                                      motivo=r.get('Motivodeanulacion') or r.get('Motivo de anulación') or '', fuente=os.path.basename(p)))
+                                      cuit=dig(col(r, 'Nrodeidentificacion')), descripcion=r.get('Descripción') or '',
+                                      motivo=col(r, 'Motivodeanulacion'), fuente=os.path.basename(p)))
             lineas[tid].append(dict(producto=r.get('Producto') or '', cantidad=num(r.get('Cantidad')), marca=r.get('Marca') or '',
-                                    familia=r.get('Familia') or '', subfamilia=r.get('Subfamilia') or r.get('SubFamilia') or '', moneda=r.get('Moneda') or ''))
-        fechas = [(r.get(fk) or '')[:10] for r in filas if r.get(fk)]
+                                    familia=r.get('Familia') or '', subfamilia=col(r, 'Subfamilia'), moneda=r.get('Moneda') or ''))
+        fechas = [col(r, 'Fecha comprobante')[:10] for r in filas if col(r, 'Fecha comprobante')]
         corte = max(fechas) if fechas else None
         if i == 0:
             corte_renglones = corte
@@ -317,51 +330,68 @@ def main(argv=None):
         quedan = sum(f['neta'] for f in lineas[fa_tid] if f['clase'] in ('producto', 'anticipo'))
         return 'total' if quedan <= 0.0001 else 'parcial', resto
 
-    ncs = sorted((t for t, c in comp.items() if c['tipo'] == 'NC'), key=lambda t: comp[t]['fecha'])
-    for t in ncs:
-        c = comp[t]
-        prod = [l for l in lineas[t] if l['clase'] in ('producto', 'anticipo')]
-        ov = AJ.es(c['cliente'], c['cuit'])
-        # a) referencia escrita
-        cand = []
+    def refs(t):
+        c, cand = comp[t], []
         for pv, n in refs_factura(c['descripcion']):
             for fpv, ft in por_nro.get((c['cuit'], n), []):
                 if pv is None or pv == fpv:
                     cand.append(ft)
-        cand = list(dict.fromkeys(cand))
+        return list(dict.fromkeys(cand))
+
+    def vincular(t, ft, metodo, prod, ov):
+        alc, resto = descontar(t, ft) if prod else ('importe', 0)
+        db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, ft, metodo, alc))
+        resumen['NC por ' + metodo] += 1
+        if resto > 0.0001:   # 0.4: la NC no entra completa en lo que queda de su factura (ya estaba anulada): no se pierde, se avisa
+            db.execute('INSERT INTO revisar VALUES(?,?,?,?,?,?)', (t, comp[t]['fecha'], comp[t]['cliente'], 'NC excede lo que queda de la factura',
+                       f'sobran {resto:g} unidades · {comp[t]["descripcion"][:60]}', ov))
+            resumen['NC que exceden su factura'] += 1
+
+    # 0.4: primero las NC que citan su factura (en orden de fecha) y después las demás: una NC sin referencia
+    # no puede quedarse con la factura que otra NC cita (caso Frappa 22/06: dos facturas iguales y dos NC).
+    todas = sorted((t for t, c in comp.items() if c['tipo'] == 'NC'), key=lambda t: comp[t]['fecha'])
+    con_ref = [t for t in todas if len(refs(t)) == 1]
+    for t in con_ref + [t for t in todas if t not in set(con_ref)]:
+        c = comp[t]
+        prod = [l for l in lineas[t] if l['clase'] in ('producto', 'anticipo')]
+        ov = AJ.es(c['cliente'], c['cuit'])
+        # a) referencia escrita
+        cand = refs(t)
         if len(cand) == 1:
-            alc, _ = descontar(t, cand[0]) if prod else ('importe', 0)
-            db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, cand[0], 'referencia', alc))
-            resumen['NC por referencia'] += 1
+            vincular(t, cand[0], 'referencia', prod, ov)
             continue
         if not prod:
             resumen['NC solo de importe (descuento o ajuste)'] += 1
             db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, None, 'solo importe', 'importe'))
             continue
         # b) mismo cliente, producto y cantidad
-        def alcanza(ft):
-            disp = collections.Counter()
+        need = collections.Counter()
+        for l in prod:
+            need[l['producto_n']] += abs(l['cantidad'])
+        def disp(ft):
+            d = collections.Counter()
             for f in lineas[ft]:
-                disp[f['producto_n']] += f['neta']
-            need = collections.Counter()
-            for l in prod:
-                need[l['producto_n']] += abs(l['cantidad'])
-            return all(disp[k] >= v - 0.0001 for k, v in need.items())
-        cand = [ft for ft in facturas if comp[ft]['cuit'] == c['cuit'] and comp[ft]['fecha'] <= c['fecha'] and alcanza(ft)]
+                if f['clase'] in ('producto', 'anticipo'):
+                    d[f['producto_n']] += f['neta']
+            return d
+        cand = [ft for ft in facturas if comp[ft]['cuit'] == c['cuit'] and comp[ft]['fecha'] <= c['fecha']
+                and all(disp(ft)[k] >= v - 0.0001 for k, v in need.items())]
         metodo = None
         if len(cand) == 1:
             metodo = 'producto y cantidad'
         elif len(cand) > 1:
             firmas = {tuple(sorted((f['producto_n'], f['neta']) for f in lineas[ft] if f['clase'] == 'producto')) for ft in cand}
+            exacta = [ft for ft in cand if all(abs(disp(ft)[k] - v) < 0.0001 for k, v in need.items())]
             if len(firmas) == 1:
                 # facturas idénticas: el resultado en cantidades es el mismo; se desempata por nombre exacto y luego la más vieja
                 exactos = [ft for ft in cand if {l['producto'] for l in prod} <= {f['producto'] for f in lineas[ft]}]
                 cand = sorted(exactos or cand, key=lambda ft: comp[ft]['fecha'])[:1]
                 metodo = 'facturas idénticas'
+            elif len(exacta) == 1:
+                # 0.4: una sola factura con exactamente la cantidad que anula la NC (caso Buena Onda 30/04: NC por 43 y una factura de 43)
+                cand, metodo = exacta, 'cantidad exacta'
         if metodo:
-            alc, _ = descontar(t, cand[0])
-            db.execute('INSERT INTO vinculos_nc VALUES(?,?,?,?)', (t, cand[0], metodo, alc))
-            resumen['NC por ' + metodo] += 1
+            vincular(t, cand[0], metodo, prod, ov)
         else:
             db.execute('INSERT INTO revisar VALUES(?,?,?,?,?,?)', (t, c['fecha'], c['cliente'], 'NC sin factura clara',
                        f"{len(cand)} candidatas · {c['descripcion'][:60]}", ov))
@@ -405,6 +435,16 @@ def main(argv=None):
     # 7. pedidos sin factura
     if a.pedidos and cab:
         ped, sha = leer_csv(a.pedidos)
+        if ped and 'Nro comp' not in ped[0] and 'Comprobante' in ped[0]:
+            # 0.3: pedidos por renglón (R24): un pedido = suma de sus renglones de Horizon
+            g = {}
+            for r in ped:
+                if (r.get('Empresa') or EMPRESA) != EMPRESA or not r.get('Comprobante'):
+                    continue
+                x = g.setdefault(r['Comprobante'], {'Nro comp': r['Comprobante'], 'Fecha': r.get('Fecha', ''), 'Cliente': r.get('Cliente', ''),
+                                                     'Bruto': 0.0, 'Nombreusuarioalta': r.get('Nombreusuarioalta', '')})
+                x['Bruto'] += num(r.get('Bruto'))
+            ped = list(g.values())
         fs = [r['Fecha'][:10] for r in ped]
         db.execute('INSERT INTO fuentes VALUES(?,?,?,?,?,?,?)', ('pedidos', os.path.basename(a.pedidos), sha, len(ped), min(fs), max(fs), 'pendientes'))
         fac = collections.defaultdict(list)
@@ -507,6 +547,53 @@ def subir_turso(base, loki=None):
     print('  Turso: ' + ' · '.join(f'limpia_{t} {v}' for t, v in n.items()))
 
 
+# ---------------------------------------------------------------- motor del datacenter (DEC-1124a)
+CONTRATO = {'id': 'limpieza', 'nombre': 'Limpieza', 'disparo': 'finnegans',
+            'lee': ['archivos:R10.csv', 'archivos:R23.csv', 'archivos:R24.csv'],
+            'escribe': ['limpia_' + t for t in TABLAS] + ['limpia_compras_firmes'],
+            'que_hace': 'Facturación limpia: NC vinculadas a su factura, duplicados, anticipos y diferencias de cambio fuera, pedidos sin factura.'}
+
+
+def contrato():
+    return dict(CONTRATO, version=VERSION)
+
+
+def correr_desde_turso(loki=None):
+    """Lee los reportes crudos de la tabla archivos de Turso (R10 renglones, R23 cabecera, R24 pedidos por renglón),
+    arma la base limpia y la sube como limpia_*. Devuelve el resumen."""
+    import importlib.util, tempfile
+    ruta = loki or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'loki_sql.py')
+    sp = importlib.util.spec_from_file_location('loki_sql', ruta)
+    L = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(L)
+    db = L.conectar()
+    d = tempfile.mkdtemp()
+    rutas = {}
+    for n in ('R10.csv', 'R23.csv', 'R24.csv'):
+        filas = db.run([('SELECT texto FROM archivos WHERE nombre=?', [n])])[0][1]
+        if filas and filas[0][0]:
+            rutas[n] = os.path.join(d, n)
+            open(rutas[n], 'w', encoding='utf-8').write(filas[0][0])
+    db.close()
+    if 'R10.csv' not in rutas:
+        raise SystemExit('FALLA: falta R10.csv (facturación por renglón) en la tabla archivos')
+    # 0.5: las cuentas ajenas salen del CRM (copia del CRM en Turso, tabla crm) → carpeta oportunidades/ como el export
+    db = L.conectar()
+    ops = os.path.join(d, 'crm', 'oportunidades'); os.makedirs(ops)
+    for i, data in db.run([("SELECT id, data FROM crm WHERE coleccion = 'oportunidades'", [])])[0][1]:
+        open(os.path.join(ops, i + '.json'), 'w', encoding='utf-8').write(data or '{}')
+    db.close()
+    argv = ['--base', os.path.join(d, 'limpia.sqlite'), '--renglones', rutas['R10.csv'], '--subir-turso', '--loki', ruta, '--crm', os.path.join(d, 'crm')]
+    if 'R23.csv' in rutas:
+        argv += ['--cabecera', rutas['R23.csv']]
+        if 'R24.csv' in rutas:
+            argv += ['--pedidos', rutas['R24.csv']]
+    res = main(argv)
+    if res.get('_falla'):
+        raise SystemExit('FALLA · reporte incompleto contra la cabecera: no se subió nada (' + json.dumps({k: v for k, v in res.items()}, ensure_ascii=False)[:300] + ')')
+    return {k: v for k, v in res.items()}
+
+
 # ---------------------------------------------------------------- autotest (sin datos reales)
 def autotest():
     import tempfile
@@ -599,6 +686,46 @@ def autotest():
                 for t in ('comprobantes', 'vinculos_nc', 'pedidos')) and \
         a_.execute('SELECT count(*) FROM renglones').fetchone() == b_.execute('SELECT count(*) FROM renglones').fetchone()
     casos.append(('subir dos veces el mismo archivo no duplica nada', igual))
+    # 0.3: mismo reporte con nombres de columna del formato R10 y pedidos por renglón (R24)
+    RC2 = [{'Nrodeidentificacion': 'Nro de identificación', 'Motivodeanulacion': 'Motivo de anulación', 'Subfamilia': 'SubFamilia',
+            'Fecha': 'Fecha Comprobante'}.get(c, c) for c in RC]
+    r2 = esc('ren2.csv', RC2, ren)
+    ped2 = esc('ped2.csv', ['Fecha', 'Comprobante', 'Cliente', 'Bruto', 'Producto', 'Empresa'], [
+        ['2026-10-19', 'P-1', 'Cliente Y', '60', 'Ont B', H], ['2026-10-19', 'P-1', 'Cliente Y', '40', 'Ont B', H],
+        ['2026-11-10', 'P-9', 'Cliente Y', '5', 'Ont B', 'SUR TECHNOLOGY S.A.']])
+    base3 = os.path.join(d, 'b3r10.sqlite')
+    with contextlib.redirect_stdout(io.StringIO()):
+        main(['--base', base3, '--renglones', r2, '--cabecera', cab, '--pedidos', ped2, '--crm', crm])
+    c3 = sqlite3.connect(base3)
+    casos.append(('columnas con otro nombre (formato R10) dan el mismo resultado',
+                  c3.execute('SELECT tid, cuit, fecha FROM comprobantes ORDER BY 1').fetchall() == a_.execute('SELECT tid, cuit, fecha FROM comprobantes ORDER BY 1').fetchall()
+                  and c3.execute("SELECT coalesce(sum(cantidad_neta),0) FROM compras_firmes WHERE tid='9'").fetchone()[0] == 6))
+    casos.append(('pedidos por renglón se agrupan por comprobante (solo Horizon)',
+                  c3.execute("SELECT estado FROM pedidos WHERE nro='P-1'").fetchone() == ('facturado',)
+                  and c3.execute("SELECT count(*) FROM pedidos WHERE nro='P-9'").fetchone()[0] == 0))
+    c3.close()
+    # 0.4: NC con referencia primero (Frappa) · desempate por cantidad exacta (Buena Onda) · NC que excede su factura
+    ren4 = [
+        ['41', '2026-06-22', FA, 'A-00005-00001619', 'Cliente F', '30-66666666-6', '', '', 'Chasis', '1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['42', '2026-06-22', FA, 'A-00005-00001620', 'Cliente F', '30-66666666-6', '', '', 'Chasis', '1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['43', '2026-06-22', NC, 'A-00005-00000390', 'Cliente F', '30-66666666-6', '', '', 'Chasis', '-1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['44', '2026-07-03', NC, 'A-00005-00000394', 'Cliente F', '30-66666666-6', 'NC Anula FC 1619', '', 'Chasis', '-1', 'HW', 'FTTH', 'OLT', 'Dólares', H],
+        ['45', '2025-12-03', FA, 'A-00005-00001509', 'Cliente B', '30-77777777-7', '', '', 'Modem', '300', '', '', '', 'Dólares', H],
+        ['46', '2026-04-06', FA, 'A-00005-00001578', 'Cliente B', '30-77777777-7', '', '', 'Modem', '43', '', '', '', 'Dólares', H],
+        ['47', '2026-04-30', NC, 'A-00005-00000385', 'Cliente B', '30-77777777-7', '', '', 'Modem', '-43', '', '', '', 'Dólares', H],
+        ['48', '2026-05-01', FA, 'A-00005-00001580', 'Cliente Q', '30-88888888-8', '', '', 'Caja', '5', '', '', '', 'Dólares', H],
+        ['49', '2026-05-02', NC, 'A-00005-00000386', 'Cliente Q', '30-88888888-8', 'Anula FC 1580', '', 'Caja', '-8', '', '', '', 'Dólares', H],
+    ]
+    r4 = esc('ren4.csv', RC, ren4)
+    base4 = os.path.join(d, 'b4nc.sqlite')
+    with contextlib.redirect_stdout(io.StringIO()):
+        main(['--base', base4, '--renglones', r4, '--crm', crm])
+    c4 = sqlite3.connect(base4)
+    f4 = lambda tid: c4.execute('SELECT coalesce(sum(cantidad_neta),0) FROM compras_firmes WHERE tid=?', (tid,)).fetchone()[0]
+    casos.append(('NC que cita su factura va primero: dos facturas iguales y dos NC quedan anuladas las dos', f4('41') == 0 and f4('42') == 0))
+    casos.append(('desempate por cantidad exacta: la NC de 43 anula la factura de 43', f4('46') == 0 and f4('45') == 300))
+    casos.append(('NC que excede lo que queda de su factura va a revisar', c4.execute("SELECT count(*) FROM revisar WHERE tid='49' AND motivo LIKE 'NC excede%'").fetchone()[0] == 1))
+    c4.close()
     cab_ok = esc('cab_ok.csv', ['TransaccionID', 'Fecha', 'Documento', 'Nro comp', 'Cliente', 'Bruto', 'Descripción'], [
         ['4', '2026-10-20', FA, 'A-00005-00001021', 'Cliente Y', '100', ''], ['9', '2026-09-01', FA, 'A-00005-00001040', 'Cliente W', '970', ''],
         ['98', '2026-11-20', FA, 'A-00005-00001098', 'Cliente U', '50', '']])
@@ -622,4 +749,11 @@ def autotest():
 if __name__ == '__main__':
     if '--autotest' in sys.argv:
         sys.exit(autotest())
+    if '--contrato' in sys.argv:
+        print(json.dumps(contrato(), ensure_ascii=False))
+        sys.exit(0)
+    if sys.argv[1:2] == ['correr']:
+        r = correr_desde_turso(next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == '--loki'), None))
+        print('RESUMEN ' + json.dumps(r, ensure_ascii=False))
+        sys.exit(0)
     sys.exit(1 if main().get('_falla') else 0)

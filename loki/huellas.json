@@ -27,10 +27,12 @@
    ]
   },
   "recompra.py": {
-   "origen": "loki-sql/scripts/recompra.py",
-   "huella": "36c964918abd",
-   "version": "v3.1",
-   "test": []
+   "origen": "24/11: motor del datacenter sobre compras limpias (antes v3.1 sobre R10 crudo; comparación en el commit)",
+   "huella": "577ecc5071ea",
+   "version": "4.1",
+   "test": [
+    "--autotest"
+   ]
   },
   "auditar.py": {
    "origen": "loki-sql/scripts/auditar.py",
@@ -67,9 +69,57 @@
    ]
   },
   "importar.py": {
-   "origen": "23/11: 0.2 + cuentas ajenas desde el CRM (--crm) y FALLA ante reporte incompleto; probado con el R10 del 20/11 (PASA) y el GIANNINA3 recortado del 23/11 (FALLA)",
-   "huella": "f3f1256ef715",
-   "version": "0.3",
+   "origen": "24/11: 0.5 = 0.3 de la puerta de entrada (cuentas ajenas desde el CRM, FALLA si falta >2 % contra la cabecera) + 0.4 del datacenter (sinónimos, correr desde Turso, NC con referencia primero, cantidad exacta)",
+   "huella": "1671581c7f54",
+   "version": "0.5",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "dc.py": {
+   "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
+   "huella": "101166408b46",
+   "version": "0.7",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "cuentas.py": {
+   "origen": "24/11: 0.2 = la ficha unificada hereda «trabajar» de la principal (acuerdo con el PM, PM-j punto 4)",
+   "huella": "9785fad29085",
+   "version": "0.2",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "puntaje.py": {
+   "origen": "nuevo 24/11 (motor Puntaje del datacenter, reglas V143 del CRM)",
+   "huella": "eedbb74829a1",
+   "version": "0.2",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "portada.py": {
+   "origen": "nuevo 24/11 (motor Portada del datacenter)",
+   "huella": "53a5a0e951e5",
+   "version": "0.1",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "publicador.py": {
+   "origen": "nuevo 24/11 (Publicador del datacenter, DEC-1124c/f)",
+   "huella": "b94e5ccea3b4",
+   "version": "0.2",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "auditor_dc.py": {
+   "origen": "24/11: 0.6 = C6 acepta que la ficha unificada herede «trabajar» (cuentas 0.2)",
+   "huella": "cfd66770d024",
+   "version": "0.6",
    "test": [
     "--autotest"
    ]

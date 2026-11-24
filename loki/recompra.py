@@ -1,130 +1,248 @@
-"""Recompra por cliente + SKU desde el Data Center (R10 facturación por renglón, 2024→).
-Reglas: Empresa HORIZON; NC electrónicas neteadas por cantidad; notas por diferencia de cambio afuera;
-v3 09/11: cada NC anula lo ultimo facturado antes que ella por TransaccionID; líneas vigentes FH/Ousent/Huawei/ZTT (+HW no Cisco);
-discontinuados se marcan para reemplazo. Pte Dest > 0 = facturado sin entregar. IVA Huawei debe ser 10,5 %.
+#!/usr/bin/env python3
+"""recompra.py 4.0 · motor Recompra del datacenter (24/11/2026, DEC-1124a/b). Solo biblioteca estándar.
+
+Recompra por cliente (CUIT) + SKU sobre las compras limpias del motor Limpieza (limpia_renglones + limpia_comprobantes).
+Las reglas de negocio son las de la v3.1 (09-13/11), que leía el R10 crudo y neteaba las notas de crédito por su cuenta:
+  · líneas vigentes FiberHome / Ousent / Huawei / ZTT (HW sin Cisco = Huawei; HW Cisco = HFC discontinuado)
+  · las ONT/ONU FiberHome se miden juntas (el cliente cambia de modelo, no deja de comprar); ONU Huawei = reemplazo por FH,
+    y «Ya migró a FH» si compró ONT FiberHome después
+  · switches S5735/S6730 = campaña, fuera del motor · marcas discontinuadas = reemplazo
+  · compras a menos de 15 días = una sola compra (entregas partidas) · ciclo = mediana de días entre compras
+  · estados: Le toca (de 15 días antes a 30 después de la próxima) · Atrasado (hasta el doble del ciclo o 180 días) · Se fue
+    · En ciclo · Sin ciclo (1 compra) · Dormido (1 compra y más de 540 días)
+Lo que cambia en la 4.0: la fuente (compras ya limpias: NC vinculadas a su factura, sin anticipos ni diferencias de cambio)
+y la salida (tablas rec_sku y rec_cliente en Turso en lugar de Excel/JSON). Calcula para todos los clientes y marca con
+«excluida» las cuentas de otros vendedores según la lista de la v3.1: el que usa el resultado decide.
+
+Uso (python3 -I): recompra.py --contrato · recompra.py --autotest · recompra.py correr [--loki ruta] [--hoy AAAA-MM-DD]
+                  recompra.py simular [--hoy AAAA-MM-DD]   (calcula sin escribir y muestra el JSON)
 """
-import pandas as pd, numpy as np, json, sys
+import datetime as D, importlib.util, json, os, re, statistics, sys
 
-HOY = pd.Timestamp(sys.argv[1] if len(sys.argv) > 1 else pd.Timestamp.today().date())
-NOPROS = ['pogliotti','itsa','amma','mutual mercantil','obercom','wiltel','gigared','astesano','generaci','itc comunic',
-          'ax internet','fibrazo','tv music','support internet','itelsa','comworks',
-          'fesacom','sur technology','presupuesto horizon','horizon trading']
-VIG = {'FiberHome','Ousent','Huawei','ZTT'}
-CISCO_PAT = r'UBR|ESR|C7200|CMTS|ERB'
+VERSION = 'recompra 4.1 · 2026-11-24'
+AQUI = os.path.dirname(os.path.abspath(__file__))
+NOPROS = ['pogliotti', 'itsa', 'amma', 'mutual mercantil', 'obercom', 'wiltel', 'gigared', 'astesano', 'generaci', 'itc comunic',
+          'ax internet', 'fibrazo', 'tv music', 'support internet', 'itelsa', 'comworks',
+          'fesacom', 'sur technology', 'presupuesto horizon', 'horizon trading']
+EXACTOS = {'itel s.a.', 'sion s.a.'}
+VIG = {'FiberHome', 'Ousent', 'Huawei', 'ZTT'}
+DISC = {'I-con', 'Zte', 'ZTE', 'Netconn', 'Intelbras', 'Cisco', 'Compal', 'Arris', 'Wolk', 'China Mobile'}
+CISCO = re.compile(r'UBR|ESR|C7200|CMTS|ERB', re.I)
+NOPROD = re.compile(r'Hi-Care|Series Basic SW|upgrade RTU|Intereses|Servicios Admin|Gastos de Admin|Anticipo|Flete|Licencia|Descuento', re.I)
+ONT = re.compile(r'^(Ont|Onu)\b', re.I)
+SWITCH = re.compile(r'^Switch S5735|^Switch S6730', re.I)
+ORDEN = {'Le toca': 0, 'Atrasado': 1, 'Se fue': 2, 'Reemplazo (ONU Huawei → FH)': 3, 'Sin ciclo (1 compra)': 4, 'En ciclo': 5,
+         'Reemplazo (discontinuado)': 6, 'Sin marca (revisar)': 6, 'Otra marca': 6, 'Ya migró a FH': 7,
+         'Switch (campaña, fuera del motor)': 7, 'Dormido': 8}
+CONTRATO = {'id': 'recompra', 'nombre': 'Recompra', 'disparo': 'finnegans', 'lee': ['limpia_renglones', 'limpia_comprobantes'],
+            'escribe': ['rec_sku', 'rec_cliente'],
+            'que_hace': 'Ciclo de compra por cliente y SKU sobre las compras limpias: le toca, atrasado, se fue, reemplazo.'}
+COLS_SKU = ['cuit', 'cliente', 'sku', 'ultimo_modelo', 'linea', 'compras', 'primera', 'ultima', 'dias_desde_ultima', 'ciclo_dias',
+            'proxima', 'cant_prom', 'cant_ult', 'cant_total', 'estado', 'excluida']
+COLS_CLI = ['cuit', 'cliente', 'estado', 'foco_sku', 'ciclo_dias', 'ultima', 'proxima', 'skus', 'skus_le_toca', 'skus_atrasados', 'excluida', 'calculado',
+            'estado_global', 'ciclo_global', 'proxima_global']
+# 4.1: ciclo global del cliente (compra «algo» de reposición cada N días), con la regla del patrón de compra de la página del CRM:
+# sin equipos de inversión (OLT, placas, switches…), fechas de los últimos 730 días, al menos 3, mediana entre 7 y 365 días.
+INV = re.compile(r'^(OLT|PLACAS|SWITCH|CMTS|NOTEBOOKS?|SERVER|FUENTES|PARTES|INFRAESTRUCTURA|EDFA|MULTIPLEXOR|ODF|UBR|INTERLOCKS|COMPONENTES|PRODUCTOS GBC)', re.I)
+INVP = re.compile(r'\b(OLT|AN5516|AN6000|MA56\d\d|EA5800|C300|C320|C600|PLACA|GPOA|GPHF|GPFD|GPSF|HSCA|PIBA|CIOA|SCUN|MPWC|SWITCH|S57\d\d|S67\d\d|NE8000|EDFA|ODF|CHASIS|RECTIFICADOR|ETP48)', re.I)
 
-r = pd.read_csv('R10.csv', sep=';', dtype=str)
-r = r[r['Empresa'].str.strip() == 'HORIZON TRADING S.A.']
-doc = r['Documento'].str.lower()
-r = r[~doc.str.contains('dif. cambio') & ~doc.str.contains('débito')]
-es_nc = r['Documento'].str.lower().str.contains('crédito')
-r['cant'] = pd.to_numeric(r['Cantidad'], errors='coerce').fillna(0).where(~es_nc, -pd.to_numeric(r['Cantidad'], errors='coerce').fillna(0).abs())  # v2 07/11: la NC ya viene negativa en R10; se fuerza negativa sin invertir
-r['fecha'] = pd.to_datetime(r['Fecha'])
-r['pte'] = pd.to_numeric(r['Pte Dest.'], errors='coerce').fillna(0)
-r['iva'] = pd.to_numeric(r['Tasa impositiva'], errors='coerce')
-r['imp'] = pd.to_numeric(r['Importe'], errors='coerce').fillna(0).where(~es_nc, -pd.to_numeric(r['Importe'], errors='coerce').fillna(0).abs())
-r['marca'] = r['Marca'].fillna('').str.strip()
-r['prod'] = r['Producto'].fillna('').str.strip()
-r['cli'] = r['Cliente'].fillna('').str.strip()
 
-def linea(row):
-    m = row['marca']
-    if m in VIG: return m
-    if m == 'HW':
-        return 'HFC disc' if pd.Series([row['prod']]).str.contains(CISCO_PAT, case=False).iloc[0] else 'Huawei'
+def ciclo_global(fechas, hoy):
+    rec = sorted(f for f in set(fechas) if (hoy - f).days <= 730)
+    if not fechas:
+        return None, None, 'sin_patron'
+    ult = max(fechas)
+    if len(rec) < 3:
+        return None, None, 'dormido' if (hoy - ult).days > 365 else 'sin_patron'
+    gaps = sorted(g for g in ((b - a).days for a, b in zip(rec, rec[1:])) if g > 0)
+    g = gaps[len(gaps) // 2] if gaps else None
+    if not g or not 7 <= g <= 365:
+        return None, None, 'dormido' if (hoy - ult).days > 365 else 'sin_patron'
+    prox = rec[-1] + D.timedelta(days=g)
+    dias = (prox - hoy).days
+    est = 'en_ciclo' if dias > 7 else 'toca' if dias >= -max(7, round(g * .5)) else 'atrasado' if -dias <= g * 3 else 'inactivo'
+    return g, prox.isoformat(), est
+
+
+def fd(s):
+    return D.date.fromisoformat(s[:10])
+
+
+def linea(marca, prod):
+    if marca in VIG:
+        return marca
+    if marca == 'HW':
+        return 'HFC disc' if CISCO.search(prod) else 'Huawei'
     return 'otra'
-r['linea'] = r.apply(linea, axis=1)
-EXACTOS = {'itel s.a.','sion s.a.'}
-r['nopros'] = r['cli'].str.lower().apply(lambda c: c in EXACTOS or any(k in c for k in NOPROS))
 
-# --- no son productos (servicios, licencias, intereses, anticipos) ---
-NOPROD = r'Hi-Care|Series Basic SW|upgrade RTU|Intereses|Servicios Admin|Gastos de Admin|Anticipo|Flete|Licencia|Descuento'
-r = r[~r['prod'].str.contains(NOPROD, case=False, regex=True)]
 
-# --- familia comercial: las ONT FH se miden juntas (el cliente cambia de modelo, no deja de comprar) ---
-es_ont = r['prod'].str.contains(r'^(Ont|Onu)\b', case=False, regex=True)
-r['fam'] = np.where(es_ont & (r['linea'] == 'FiberHome'), 'ONT FiberHome (cualquier modelo)',
-           np.where(es_ont & (r['linea'] == 'Huawei'), 'ONU Huawei → reemplazo FH', r['prod']))
-es_switch = r['prod'].str.contains(r'^Switch S5735|^Switch S6730', case=False, regex=True)
+def excluida(cli):
+    c = cli.lower().strip()
+    return c in EXACTOS or any(k in c for k in NOPROS)
 
-# --- chequeos ---
-iva_mal = r[(r['linea'] == 'Huawei') & (~es_nc) & (r['iva'] != 10.5)][['Fecha','cli','prod','Tasa impositiva','Comprobante']]
-pte = r[(r['pte'] > 0) & (~es_nc) & (~r['nopros'])][['Fecha','cli','prod','cant','pte','Comprobante','Vendedor']]
 
-# --- ciclos: compras a menos de 15 días = una sola compra (entregas partidas) ---
-v = r[~r['nopros']].copy()
-v['switch'] = es_switch
-v['tid'] = pd.to_numeric(v['TransaccionID'], errors='coerce').fillna(0)  # v3: orden real de carga dentro del dia
-DISC = {'I-con','Zte','ZTE','Netconn','Intelbras','Cisco','Compal','Arris','Wolk','China Mobile'}
-marca_de = v.groupby(['cli','fam'])['marca'].last().to_dict()
-filas = []
-for (cli, fam, lin), d in v.groupby(['cli','fam','linea']):
-    d = d.sort_values(['fecha','tid'])
-    # v3 09/11: cada NC anula, en orden de TransaccionID, lo ultimo facturado antes que ella. Asi FA 15/10 + NC 20/10 + FA 20/10 = compra del 20/10.
-    vivas = []
-    for _, x in d.iterrows():
-        if x['cant'] < 0:
-            resto = -x['cant']
-            while resto > 1e-9 and vivas:
-                t = min(vivas[-1]['cant'], resto); vivas[-1]['cant'] -= t; resto -= t
-                if vivas[-1]['cant'] <= 1e-9: vivas.pop()
-        elif x['cant'] > 0:
-            vivas.append({'fecha': x['fecha'], 'cant': x['cant'], 'modelo': x['prod'], 'switch': x['switch']})
-    ev = []  # eventos de compra
-    for x in vivas:
-        if ev and (x['fecha'] - ev[-1]['f0']).days < 15:
-            ev[-1]['cant'] += x['cant']; ev[-1]['f'] = x['fecha']; ev[-1]['modelo'] = x['modelo']
+def calcular(renglones, hoy):
+    """renglones: dicts {cuit, cliente, fecha, tid, producto, marca, cantidad_neta} de compras firmes. Devuelve (skus, clientes)."""
+    hoy = fd(hoy)
+    nombre, grupos, marca_de, glob = {}, {}, {}, {}
+    for r in sorted(renglones, key=lambda r: (r['fecha'], int(re.sub(r'\D', '', str(r['tid'])) or 0))):
+        prod, marca = (r['producto'] or '').strip(), (r['marca'] or '').strip()
+        if not r['cuit'] or (r['cantidad_neta'] or 0) <= 0 or NOPROD.search(prod):
+            continue
+        lin = linea(marca, prod)
+        fam = ('ONT FiberHome (cualquier modelo)' if lin == 'FiberHome' else 'ONU Huawei → reemplazo FH' if lin == 'Huawei' else prod) if ONT.search(prod) else prod
+        nombre[r['cuit']] = (r['cliente'] or '').strip()
+        if not INV.search(str(r.get('subfamilia') or r.get('familia') or prod)) and not INVP.search(prod):
+            glob.setdefault(r['cuit'], []).append(fd(r['fecha']))
+        marca_de[(r['cuit'], fam)] = marca
+        grupos.setdefault((r['cuit'], fam, lin), []).append({'fecha': fd(r['fecha']), 'cant': float(r['cantidad_neta']), 'modelo': prod,
+                                                             'switch': bool(SWITCH.search(prod))})
+    skus = []
+    for (cuit, fam, lin), vivas in grupos.items():
+        ev = []
+        for x in vivas:
+            if ev and (x['fecha'] - ev[-1]['f0']).days < 15:
+                ev[-1]['cant'] += x['cant']; ev[-1]['f'] = x['fecha']; ev[-1]['modelo'] = x['modelo']
+            else:
+                ev.append({'f0': x['fecha'], 'f': x['fecha'], 'cant': x['cant'], 'modelo': x['modelo']})
+        fechas = [e['f0'] for e in ev]
+        n, ult = len(ev), ev[-1]['f']
+        dias_ult = (hoy - ult).days
+        ciclo = int(statistics.median([(b - a).days for a, b in zip(fechas, fechas[1:])])) if n >= 2 else None
+        if any(x['switch'] for x in vivas):
+            estado = 'Switch (campaña, fuera del motor)'
+        elif fam.startswith('ONU Huawei'):
+            estado = 'Reemplazo (ONU Huawei → FH)'
+        elif lin not in VIG and lin != 'Huawei':
+            mc = marca_de.get((cuit, fam), '')
+            estado = 'Reemplazo (discontinuado)' if (lin == 'HFC disc' or mc in DISC) else ('Sin marca (revisar)' if mc == '' else 'Otra marca')
+        elif ciclo is None:
+            estado = 'Sin ciclo (1 compra)' if dias_ult <= 540 else 'Dormido'
         else:
-            ev.append({'f0': x['fecha'], 'f': x['fecha'], 'cant': x['cant'], 'modelo': x['modelo']})
-    if not ev: continue
-    fechas = [e['f0'] for e in ev]; n = len(ev)
-    ult = ev[-1]['f']; dias_ult = (HOY - ult).days
-    ciclo = int(np.median(np.diff(fechas).astype('timedelta64[D]').astype(int))) if n >= 2 else None
-    sw = any(x['switch'] for x in vivas)
-    d = pd.DataFrame({'cant': [e['cant'] for e in ev]})
-    prod = ev[-1]['modelo']
-    if sw:
-        estado = 'Switch (campaña, fuera del motor)'
-    elif fam.startswith('ONU Huawei'):
-        estado = 'Reemplazo (ONU Huawei → FH)'
-    elif lin not in VIG and lin != 'Huawei':
-        mc = marca_de.get((cli, fam), '')
-        estado = 'Reemplazo (discontinuado)' if (lin == 'HFC disc' or mc in DISC) else ('Sin marca (revisar)' if mc == '' else 'Otra marca')
-    elif ciclo is None:
-        estado = 'Sin ciclo (1 compra)' if dias_ult <= 540 else 'Dormido'
-    else:
-        prox = ult + pd.Timedelta(days=ciclo)
-        atraso = (HOY - prox).days
-        if atraso < -15: estado = 'En ciclo'
-        elif atraso <= 30: estado = 'Le toca'
-        elif dias_ult <= max(2*ciclo, 180): estado = 'Atrasado'
-        else: estado = 'Se fue'
-    filas.append(dict(cliente=cli, sku=fam, ultimo_modelo=prod, linea=lin, compras=n, primera=fechas[0].date(), ultima=ult.date(),
-                      dias_desde_ultima=dias_ult, ciclo_dias=ciclo,
-                      proxima=(ult + pd.Timedelta(days=ciclo)).date() if ciclo else None,
-                      cant_prom=round(d['cant'].mean()), cant_ult=round(d['cant'].iloc[-1]), cant_total=round(d['cant'].sum()),
-                      estado=estado))
-out = pd.DataFrame(filas)
-orden = {'Le toca':0,'Atrasado':1,'Se fue':2,'Reemplazo (ONU Huawei → FH)':3,'Sin ciclo (1 compra)':4,'En ciclo':5,
-         'Reemplazo (discontinuado)':6,'Sin marca (revisar)':6,'Otra marca':6,'Switch (campaña, fuera del motor)':7,'Dormido':8}
-out['o'] = out['estado'].map(orden)
-out = out.sort_values(['o','dias_desde_ultima']).drop(columns='o')
+            atraso = (hoy - (ult + D.timedelta(days=ciclo))).days
+            estado = 'En ciclo' if atraso < -15 else 'Le toca' if atraso <= 30 else 'Atrasado' if dias_ult <= max(2 * ciclo, 180) else 'Se fue'
+        cants = [e['cant'] for e in ev]
+        skus.append(dict(cuit=cuit, cliente=nombre[cuit], sku=fam, ultimo_modelo=ev[-1]['modelo'], linea=lin, compras=n,
+                         primera=fechas[0].isoformat(), ultima=ult.isoformat(), dias_desde_ultima=dias_ult, ciclo_dias=ciclo,
+                         proxima=(ult + D.timedelta(days=ciclo)).isoformat() if ciclo else None,
+                         cant_prom=round(sum(cants) / n), cant_ult=round(cants[-1]), cant_total=round(sum(cants)), estado=estado,
+                         excluida=int(excluida(nombre[cuit]))))
+    # ONU Huawei ya migradas a ONT FH no son reemplazo
+    fh = {s['cuit']: s['ultima'] for s in skus if s['sku'].startswith('ONT FiberHome')}
+    for s in skus:
+        if s['estado'] == 'Reemplazo (ONU Huawei → FH)' and s['cuit'] in fh and fh[s['cuit']] > s['ultima']:
+            s['estado'] = 'Ya migró a FH'
+    skus.sort(key=lambda s: (ORDEN.get(s['estado'], 9), s['dias_desde_ultima']))
+    clientes = []
+    for cuit in sorted({s['cuit'] for s in skus}):
+        ss = [s for s in skus if s['cuit'] == cuit]
+        f = ss[0]
+        clientes.append(dict(cuit=cuit, cliente=f['cliente'], estado=f['estado'], foco_sku=f['sku'], ciclo_dias=f['ciclo_dias'],
+                             ultima=max(s['ultima'] for s in ss), proxima=f['proxima'], skus=len(ss),
+                             skus_le_toca=sum(s['estado'] == 'Le toca' for s in ss), skus_atrasados=sum(s['estado'] == 'Atrasado' for s in ss),
+                             excluida=f['excluida'], calculado=hoy.isoformat(),
+                             **dict(zip(('ciclo_global', 'proxima_global', 'estado_global'), ciclo_global(glob.get(cuit, []), hoy)))))
+    return skus, clientes
 
-with pd.ExcelWriter(f'LOKI_Recompra_SKU_{HOY.date()}.xlsx') as w:
-    out.to_excel(w, sheet_name='Recompra por SKU', index=False)
-    pte.to_excel(w, sheet_name='Facturado sin entregar', index=False)
-    iva_mal.to_excel(w, sheet_name='IVA Huawei a revisar', index=False)
-out.to_json('recompra_sku.json', orient='records', date_format='iso', force_ascii=False)
-print(out['estado'].value_counts().to_string())
-print('pte', len(pte), 'iva_mal', len(iva_mal), 'nopros excl lines', int(r['nopros'].sum()))
 
-# --- post: ONU Huawei ya migradas a ONT FH no son reemplazo ---
-fh = out[out['sku'].str.startswith('ONT FiberHome')].set_index('cliente')['ultima']
-m = out['estado'].eq('Reemplazo (ONU Huawei → FH)') & out['cliente'].map(fh).notna()
-m &= pd.to_datetime(out['cliente'].map(fh)) > pd.to_datetime(out['ultima'])
-out.loc[m, 'estado'] = 'Ya migró a FH'
-with pd.ExcelWriter(f'LOKI_Recompra_SKU_{HOY.date()}.xlsx') as w:
-    out.to_excel(w, sheet_name='Recompra por SKU', index=False)
-    pte.to_excel(w, sheet_name='Facturado sin entregar', index=False)
-    iva_mal.to_excel(w, sheet_name='IVA Huawei a revisar', index=False)
-out.to_json('recompra_sku.json', orient='records', date_format='iso', force_ascii=False)
-print('migradas', int(m.sum()))
+def loki(ruta=None):
+    ruta = ruta or os.path.join(AQUI, 'loki_sql.py')
+    sp = importlib.util.spec_from_file_location('loki_sql', ruta)
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def leer(db):
+    cols, filas = db.run([("SELECT c.cuit, c.cliente, c.fecha, c.tid, r.producto, r.marca, r.familia, r.subfamilia, r.cantidad_neta FROM limpia_renglones r "
+                           "JOIN limpia_comprobantes c ON c.tid = r.tid WHERE c.tipo = 'FA' AND r.clase = 'producto' AND r.cantidad_neta > 0.0001", [])])[0]
+    return [dict(zip(cols, f)) for f in filas]
+
+
+def escribir(db, skus, clientes):
+    st = [('DROP TABLE IF EXISTS rec_sku', []), ('DROP TABLE IF EXISTS rec_cliente', []),
+          ('CREATE TABLE rec_sku(' + ', '.join(COLS_SKU) + ')', []), ('CREATE TABLE rec_cliente(' + ', '.join(COLS_CLI) + ')', [])]
+    st += [('INSERT INTO rec_sku VALUES(' + ','.join('?' * len(COLS_SKU)) + ')', [s[c] for c in COLS_SKU]) for s in skus]
+    st += [('INSERT INTO rec_cliente VALUES(' + ','.join('?' * len(COLS_CLI)) + ')', [c[k] for k in COLS_CLI]) for c in clientes]
+    db.run(st)
+
+
+def resumen(skus, clientes):
+    est = {}
+    for s in skus:
+        if not s['excluida']:
+            est[s['estado']] = est.get(s['estado'], 0) + 1
+    return {'skus': len(skus), 'clientes': len(clientes), 'por_estado': est}
+
+
+# ---------------------------------------------------------------- autotest (sin datos reales)
+def autotest():
+    hoy = '2026-11-24'
+    R = lambda cuit, cli, f, prod, marca, q, tid=1: dict(cuit=cuit, cliente=cli, fecha=f, tid=tid, producto=prod, marca=marca, cantidad_neta=q)
+    ren = [
+        # A: ONT FH cada ~30 días, cambia de modelo; entrega partida a 5 días = una compra; última 25/10 → le toca
+        R('1', 'Cliente A', '2026-07-27', 'Ont Gpon HG6145F3', 'FiberHome', 100), R('1', 'Cliente A', '2026-08-26', 'Ont Gpon HG6145F3', 'FiberHome', 100),
+        R('1', 'Cliente A', '2026-09-25', 'Ont Gpon HG6543D', 'FiberHome', 50), R('1', 'Cliente A', '2026-09-30', 'Ont Gpon HG6543D', 'FiberHome', 50),
+        R('1', 'Cliente A', '2026-10-25', 'Ont Gpon HG6543D', 'FiberHome', 80),
+        # B: cada ~30 días, última 03/03 (266 días > 180) → se fue · C: cada 30 días, última 05/09 (próxima 05/10, 50 días tarde, 80 días) → atrasado
+        R('2', 'Cliente B', '2026-01-02', 'Caja FitDP', 'FiberHome', 10), R('2', 'Cliente B', '2026-02-01', 'Caja FitDP', 'FiberHome', 10),
+        R('2', 'Cliente B', '2026-03-03', 'Caja FitDP', 'FiberHome', 10),
+        R('3', 'Cliente C', '2026-07-07', 'Drop', 'ZTT', 5), R('3', 'Cliente C', '2026-08-06', 'Drop', 'ZTT', 5), R('3', 'Cliente C', '2026-09-05', 'Drop', 'ZTT', 5),
+        # D: ONU Huawei y después ONT FH → ya migró · E: ONU Huawei sola → reemplazo
+        R('4', 'Cliente D', '2026-03-01', 'Onu EG8145V5', 'HW', 20), R('4', 'Cliente D', '2026-09-01', 'Ont Gpon HG6145F3', 'FiberHome', 20),
+        R('5', 'Cliente E', '2026-09-01', 'Onu EG8145V5', 'HW', 20),
+        # F: switch · G: marca discontinuada · H: compra única reciente · I: compra única vieja · J: otro vendedor
+        R('6', 'Cliente F', '2026-10-01', 'Switch S5735-L', 'HW', 1), R('7', 'Cliente G', '2026-10-01', 'Ont X', 'I-con', 10),
+        R('8', 'Cliente H', '2026-10-01', 'Cable ADSS', 'FiberHome', 1000), R('9', 'Cliente I', '2024-01-10', 'Cable ADSS', 'FiberHome', 1000),
+        R('10', 'Comworks SA', '2026-10-01', 'Ont Gpon HG6145F3', 'FiberHome', 500),
+        # no son compras: descuento y cantidad 0 (anulada por NC en Limpieza)
+        R('1', 'Cliente A', '2026-10-25', 'Descuento Comercial', '', 1), R('2', 'Cliente B', '2026-11-20', 'Caja FitDP', 'FiberHome', 0),
+    ]
+    skus, cli = calcular(ren, hoy)
+    S = lambda cuit, sku=None: next((s for s in skus if s['cuit'] == cuit and (sku is None or s['sku'] == sku)), None)
+    a = S('1')
+    casos = [
+        ('ONT FiberHome juntas aunque cambie el modelo', a['sku'] == 'ONT FiberHome (cualquier modelo)' and a['ultimo_modelo'] == 'Ont Gpon HG6543D'),
+        ('entrega partida a menos de 15 días = una compra', a['compras'] == 4 and a['cant_total'] == 380),
+        ('ciclo = mediana de días entre compras; le toca', a['ciclo_dias'] == 30 and a['proxima'] == '2026-11-24' and a['estado'] == 'Le toca'),
+        ('pasado el doble del ciclo y 180 días: se fue', S('2')['estado'] == 'Se fue'),
+        ('atrasado dentro de los 180 días', S('3')['estado'] == 'Atrasado'),
+        ('ONU Huawei con ONT FH después: ya migró', S('4', 'ONU Huawei → reemplazo FH')['estado'] == 'Ya migró a FH'),
+        ('ONU Huawei sola: reemplazo', S('5')['estado'] == 'Reemplazo (ONU Huawei → FH)'),
+        ('switch fuera del motor', S('6')['estado'] == 'Switch (campaña, fuera del motor)'),
+        ('marca discontinuada: reemplazo', S('7')['estado'] == 'Reemplazo (discontinuado)'),
+        ('compra única: sin ciclo o dormido', S('8')['estado'] == 'Sin ciclo (1 compra)' and S('9')['estado'] == 'Dormido'),
+        ('otro vendedor queda calculado y marcado excluida', S('10')['excluida'] == 1),
+        ('descuentos y cantidades anuladas no son compras', not any(s['sku'].startswith('Descuento') for s in skus) and S('2')['ultima'] == '2026-03-03'),
+        ('resumen por cliente: el estado más urgente primero', next(c for c in cli if c['cuit'] == '1')['estado'] == 'Le toca'),
+        ('ciclo global: compra algo cada ~30 días aunque cada producto tenga 1 compra', (lambda c: c['ciclo_global'] == 30 and c['estado_global'] == 'toca')(
+            next(c for c in calcular([R('20', 'Cliente Z', f, p, 'FiberHome', 1) for f, p in (('2026-08-25', 'Drop'), ('2026-09-24', 'Caja FitDP'), ('2026-10-24', 'Cable ADSS'))], hoy)[1]))),
+        ('ciclo global sin equipos de inversión (OLT, placas)', next(c for c in calcular([R('21', 'Cliente W', f, 'OLT AN6000-2', 'FiberHome', 1) for f in ('2026-08-25', '2026-09-24', '2026-10-24')], hoy)[1])['estado_global'] == 'sin_patron'),
+    ]
+    for t, ok in casos:
+        print(('  OK    ' if ok else '  FALLA ') + t)
+    ok = sum(1 for _, x in casos if x)
+    print(f'autotest recompra: {ok}/{len(casos)}')
+    return 0 if ok == len(casos) else 1
+
+
+if __name__ == '__main__':
+    a = sys.argv[1:]
+    arg = lambda k, dflt=None: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else dflt
+    hoy = arg('--hoy', D.date.today().isoformat())
+    if '--autotest' in a:
+        sys.exit(autotest())
+    if '--contrato' in a:
+        print(json.dumps(dict(CONTRATO, version=VERSION), ensure_ascii=False))
+        sys.exit(0)
+    if a[:1] in (['correr'], ['simular']):
+        db = loki(arg('--loki')).conectar()
+        skus, cli = calcular(leer(db), hoy)
+        if a[0] == 'correr':
+            escribir(db, skus, cli)
+        db.close()
+        if a[0] == 'simular':
+            print(json.dumps(skus, ensure_ascii=False, default=str))
+        print('RESUMEN ' + json.dumps(resumen(skus, cli), ensure_ascii=False))
+        sys.exit(0)
+    print(__doc__)

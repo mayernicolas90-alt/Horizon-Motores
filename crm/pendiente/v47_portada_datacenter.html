@@ -1,0 +1,52 @@
+<style id="hz-v47-portada-dc-css">
+.hz47-tipo{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:2px}
+.hz47-tipo.rapida{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
+.hz47-tipo.consultiva{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.hz47-origen{font-size:11.5px;color:var(--muted);margin:8px 4px 0}
+</style>
+<script id="hz-v47-portada-dc">
+/* v47 (24/11/2026) · Portada desde el datacenter (DEC-1124e): si config/portada es de hoy o de ayer, los 10 del Sales Engine
+   son la lista que calculó el motor Portada en Turso (una sola lista por puntaje con monto, rápidas y consultivas), con la
+   etiqueta del tipo de venta en cada fila. Si los datos son más viejos o faltan, la página calcula como siempre y lo dice.
+   La bandeja (puestos 11 a 20) sigue saliendo del ranking propio, sin repetir los 10 de la portada. */
+(function(){
+ if(window.hzV47dc)return;window.hzV47dc=true;
+ let por=null;
+ const fresca=()=>{if(!por||!por.fecha||!Array.isArray(por.lista)||!por.lista.length)return false;const d=(Date.parse(today())-Date.parse(por.fecha))/864e5;return d>=0&&d<=1};
+ const tipoDe=id=>{const x=fresca()&&por.lista.find(y=>y.crm_id===id);return x?x.tipo:null};
+ window.hzPortadaDC={datos:()=>por,fresca};
+ const er=hzEngineRank,memo=new WeakMap();
+ hzEngineRank=function(filter){
+  const r=er.apply(this,arguments);
+  if(filter||!r||!fresca())return r;
+  if(memo.has(r)&&memo.get(r).por===por)return memo.get(r).val;
+  const pick=[];
+  for(const e of por.lista){
+   const o=(st.ops||[]).find(x=>x.id===e.crm_id);if(!o)continue;
+   let p=null;try{p=prioInfo(o)}catch(_){}
+   if(!p)p={s:e.s,R:String(e.motivo||'').split(' · ').filter(Boolean),nivel:e.s>=60?'alta':e.s>=35?'media':'baja',enJuego:e.valor_en_juego||0,funding:'',objetivo:''};
+   pick.push({o,p,tipo:e.tipo});
+  }
+  if(!pick.length)return r;
+  const val={...r,pick,pickIds:new Set(pick.map(x=>x.o.id)),origen:'datacenter'};
+  memo.set(r,{por,val});return val;
+ };
+ function decorar(){
+  if(typeof st==='undefined')return;
+  const eng=hzEngineRank();if(!eng||!eng.pick||!eng.pick.length)return;
+  const t=[...document.querySelectorAll('table.hz-sales-table')].find(x=>{const tr=x.querySelector('tbody tr[data-id]');return tr&&tr.dataset.id===eng.pick[0].o.id});
+  if(!t)return;
+  if(eng.origen==='datacenter')t.querySelectorAll('tbody tr[data-id]').forEach(tr=>{const k=tipoDe(tr.dataset.id),b=tr.querySelector('td:nth-child(2) b');if(k&&b&&!tr.querySelector('.hz47-tipo'))b.insertAdjacentHTML('afterend','<span class="hz47-tipo '+k+'">'+(k==='rapida'?'Rápida':'Consultiva')+'</span>')});
+  const w=t.closest('.tablewrap')||t;
+  if(!w.nextElementSibling||!w.nextElementSibling.classList.contains('hz47-origen')){
+   const f=por&&por.fecha?por.fecha.slice(8,10)+'/'+por.fecha.slice(5,7):'';
+   w.insertAdjacentHTML('afterend','<p class="hz47-origen">'+(eng.origen==='datacenter'?'Lista del datacenter · datos del '+f+' · rápidas y consultivas por puntaje':'Lista calculada en el CRM'+(f?' (la del datacenter es del '+f+')':''))+'</p>');
+  }
+ }
+ const rd=render;
+ render=function(){const out=rd.apply(this,arguments);try{decorar()}catch(e){console.warn('[v47] portada dc',e)}return out};
+ (async()=>{const db=await window.claude?.use?.('db');if(!db)return;
+  db.collection('config').doc('portada').onSnapshot(sn=>{const d=sn&&sn.exists===false?null:sn&&sn.data&&sn.data();por=d||null;try{hzEngCache=null}catch(_){}try{if(st.loaded)render()}catch(_){}},()=>{});
+ })();
+})();
+</script>

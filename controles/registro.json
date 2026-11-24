@@ -1,16 +1,130 @@
 {
  "regla": "Cada error que aparece queda convertido en un control en ese mismo momento (N05). Un error sin control puede repetirse.",
  "controles": [
-  {"id": "C01", "error": "ONU devueltas contadas como venta (NM07 SR Internet, NM09 Redtel)", "fecha": "2026-11-21", "tipo": "caso", "archivo": "controles/c01_venta_neta.py", "corre": ["ci", "diario"], "leccion": "L-venta-neta"},
-  {"id": "C02", "error": "Se empujó asegurar entrega de algo ya remitido (NM53 Contratista)", "fecha": "2026-11-21", "tipo": "caso", "archivo": "controles/c01_venta_neta.py", "corre": ["diario"], "leccion": "L-pestanas"},
-  {"id": "C03", "error": "El CRM dice entregado y Finnegans no, o al revés (conflicto de fuentes)", "fecha": "2026-11-21", "tipo": "alerta", "archivo": "controles/c03_conflictos_entrega.py", "corre": ["diario"], "leccion": "L-venta-neta"},
-  {"id": "C04", "error": "Se acumularon 23 reglas pendientes de Nicolás", "fecha": "2026-11-21", "tipo": "alerta", "archivo": "controles/c04_sin_pendientes.py", "corre": ["diario"], "leccion": "L-nada-pendiente"},
-  {"id": "C05", "error": "El top 5 de Loki mezclaba entregas (posventa) con empujes de venta", "fecha": "2026-11-21", "tipo": "caso", "archivo": "controles/c05_top5_solo_venta.py", "corre": ["ci", "diario"], "leccion": "L-pestanas"},
-  {"id": "C06", "error": "El arranque leía el cerebro en prosa y no las tablas de conocimiento k_* (tema #1002)", "fecha": "2026-11-22", "tipo": "caso", "archivo": "controles/c06_arranque_conocimiento.py", "corre": ["ci", "diario"], "leccion": "L-procesar-una-vez"},
-  {"id": "G01", "error": "Se subió código de Loki al repositorio de la otra cuenta, o firmado por la otra cuenta", "fecha": "2026-11-21", "tipo": "guardia", "archivo": "controles/g01_repo_de_loki.py", "corre": ["ci"], "leccion": "L-dos-cuentas"},
-  {"id": "G02", "error": "Escribir en el CRM sin «hacelo» (D01)", "fecha": "2026-11-21", "tipo": "guardia", "archivo": "controles/hooks/guardia_hacelo.py", "corre": ["hook de Claude Code (.claude/settings.json del repo)", "ci"], "leccion": "D01"},
-  {"id": "I01", "error": "Narrar el proceso mientras trabaja", "fecha": "2026-11-21", "tipo": "instruccion", "archivo": "k_preferencia (base de Loki)", "corre": ["cada apertura (lo imprime abrir --reglas)"], "leccion": "L-silencio"},
-  {"id": "I02", "error": "Preguntarle a Nicolás algo que estaba en la ficha (Luna Net)", "fecha": "2026-11-21", "tipo": "instruccion", "archivo": "k_preferencia (base de Loki)", "corre": ["cada apertura (lo imprime abrir --reglas)"], "leccion": "L-buscar-primero"},
-  {"id": "P01", "error": "El Sales Engine empuja asegurar entrega (debe ir a Posventa)", "fecha": "2026-11-21", "tipo": "falta", "archivo": null, "corre": [], "leccion": "L-pestanas", "nota": "El Sales Engine corre en la cuenta de la otra base: el control se escribe cuando el motor se cambie (DEC-1121c), en su repositorio."}
+  {
+   "id": "C01",
+   "error": "ONU devueltas contadas como venta (NM07 SR Internet, NM09 Redtel)",
+   "fecha": "2026-11-21",
+   "tipo": "caso",
+   "archivo": "controles/c01_venta_neta.py",
+   "corre": [
+    "ci",
+    "diario"
+   ],
+   "leccion": "L-venta-neta"
+  },
+  {
+   "id": "C02",
+   "error": "Se empujó asegurar entrega de algo ya remitido (NM53 Contratista)",
+   "fecha": "2026-11-21",
+   "tipo": "caso",
+   "archivo": "controles/c01_venta_neta.py",
+   "corre": [
+    "diario"
+   ],
+   "leccion": "L-pestanas"
+  },
+  {
+   "id": "C03",
+   "error": "El CRM dice entregado y Finnegans no, o al revés (conflicto de fuentes)",
+   "fecha": "2026-11-21",
+   "tipo": "alerta",
+   "archivo": "controles/c03_conflictos_entrega.py",
+   "corre": [
+    "diario"
+   ],
+   "leccion": "L-venta-neta"
+  },
+  {
+   "id": "C04",
+   "error": "Se acumularon 23 reglas pendientes de Nicolás",
+   "fecha": "2026-11-21",
+   "tipo": "alerta",
+   "archivo": "controles/c04_sin_pendientes.py",
+   "corre": [
+    "diario"
+   ],
+   "leccion": "L-nada-pendiente"
+  },
+  {
+   "id": "C05",
+   "error": "El top 5 de Loki mezclaba entregas (posventa) con empujes de venta",
+   "fecha": "2026-11-21",
+   "tipo": "caso",
+   "archivo": "controles/c05_top5_solo_venta.py",
+   "corre": [
+    "ci",
+    "diario"
+   ],
+   "leccion": "L-pestanas"
+  },
+  {
+   "id": "C06",
+   "error": "El arranque leía el cerebro en prosa y no las tablas de conocimiento k_* (tema #1002)",
+   "fecha": "2026-11-22",
+   "tipo": "caso",
+   "archivo": "controles/c06_arranque_conocimiento.py",
+   "corre": [
+    "ci",
+    "diario"
+   ],
+   "leccion": "L-procesar-una-vez"
+  },
+  {
+   "id": "G01",
+   "error": "Se subió código de Loki al repositorio de la otra cuenta, o firmado por la otra cuenta",
+   "fecha": "2026-11-21",
+   "tipo": "guardia",
+   "archivo": "controles/g01_repo_de_loki.py",
+   "corre": [
+    "ci"
+   ],
+   "leccion": "L-dos-cuentas"
+  },
+  {
+   "id": "G02",
+   "error": "Escribir en el CRM sin «hacelo» (D01)",
+   "fecha": "2026-11-21",
+   "tipo": "guardia",
+   "archivo": "controles/hooks/guardia_hacelo.py",
+   "corre": [
+    "hook de Claude Code (.claude/settings.json del repo)",
+    "ci"
+   ],
+   "leccion": "D01",
+   "nota": "24/11: excepción DEC-1124c/f para el paquete del Publicador (manifiesto vigente, auditor PASA o AVISO)."
+  },
+  {
+   "id": "I01",
+   "error": "Narrar el proceso mientras trabaja",
+   "fecha": "2026-11-21",
+   "tipo": "instruccion",
+   "archivo": "k_preferencia (base de Loki)",
+   "corre": [
+    "cada apertura (lo imprime abrir --reglas)"
+   ],
+   "leccion": "L-silencio"
+  },
+  {
+   "id": "I02",
+   "error": "Preguntarle a Nicolás algo que estaba en la ficha (Luna Net)",
+   "fecha": "2026-11-21",
+   "tipo": "instruccion",
+   "archivo": "k_preferencia (base de Loki)",
+   "corre": [
+    "cada apertura (lo imprime abrir --reglas)"
+   ],
+   "leccion": "L-buscar-primero"
+  },
+  {
+   "id": "P01",
+   "error": "El Sales Engine empuja asegurar entrega (debe ir a Posventa)",
+   "fecha": "2026-11-21",
+   "tipo": "falta",
+   "archivo": null,
+   "corre": [],
+   "leccion": "L-pestanas",
+   "nota": "El Sales Engine corre en la cuenta de la otra base: el control se escribe cuando el motor se cambie (DEC-1121c), en su repositorio."
+  }
  ]
 }

@@ -1,0 +1,141 @@
+<style id="hz-v47-carriles-css">
+.hz-lane-head td{background:var(--sunk)!important;padding:9px 14px!important;border-bottom:1px solid var(--line)}
+.hz-lane-head .hz-lane-t{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink)}
+.hz-lane-head .hz-lane-s{font-size:11.5px;color:var(--muted);margin-left:8px}
+.hz-lane-head.r .hz-lane-t::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:8px;vertical-align:1px}
+.hz-lane-head.c .hz-lane-t::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:8px;vertical-align:1px}
+.hz-corte{font-size:11.5px;color:var(--muted);margin:8px 4px 0}
+.hz-corte.viejo{color:var(--warn);font-weight:700}
+.hz-sales-table[data-hz-v47] td .rs,.hz-sales-table[data-hz-v47] td.hact>:not(.hz47-acc){display:none!important}
+.hz47-acc{font-size:13.5px;line-height:1.45;color:var(--ink)}
+.hz47-acc .venc{color:var(--bad);font-weight:700;margin-left:6px;font-size:12px}
+.hz47-acc .hint{color:var(--muted)}
+#hzV47Chips{display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px 4px;align-items:flex-start}
+#hzV47Chips details{border:1px solid var(--line);border-radius:999px;background:var(--panel);max-width:100%}
+#hzV47Chips details[open]{border-radius:12px;flex-basis:100%;background:var(--bg)}
+#hzV47Chips summary{list-style:none;cursor:pointer;padding:5px 12px;font-size:12px;font-weight:700;white-space:nowrap;color:var(--ink)}
+#hzV47Chips summary::-webkit-details-marker{display:none}
+#hzV47Chips summary::after{content:" ▸";color:var(--muted)}#hzV47Chips details[open] summary::after{content:" ▾"}
+#hzV47Chips details.ojo summary{color:var(--warn)}#hzV47Chips details.comp summary{color:var(--warn)}
+#hzV47Chips .hz47-body{padding:2px 14px 12px;font-size:12.5px;line-height:1.5}
+#hzV47Chips .hz47-body ul{margin:4px 0 0;padding-left:18px}#hzV47Chips .hz47-body li{margin:2px 0}
+#hzV47Chips .mas{color:var(--green);font-weight:700}#hzV47Chips .menos{color:var(--bad);font-weight:700}#hzV47Chips .nota{color:var(--muted)}
+.hz-compartida-chip{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);margin-left:6px}
+</style>
+<script id="hz-v47-carriles">
+/* v47 (23/11/2026) · Compras limpias + dos carriles + cuenta compartida.
+   1. Recompra sobre compras limpias: colección comprasLimpias (una por CUIT; cantidades netas de notas de crédito, sin anticipos
+      ni diferencias de cambio, sin precios; la arma importar.py de Loki) y config/limpia (corte, fuentes y pedidos cuya factura
+      se anuló). Solo cambia lo que lee el motor de recompra (hzBuyPattern); el Historial de compras sigue mostrando la facturación.
+      Sin documento limpio para un CUIT, el motor usa la facturación como antes.
+   2. Cuenta compartida (campo cuentaCompartida = si): no entra en el puntaje, los carriles, la bandeja ni el box de Recompra.
+   3. Portada en dos carriles: Rápidas (ONT/ONU y recompras) y Consultivas (cable, OLT, ópticas, proyectos), 5 lugares cada uno,
+      mismo orden del Sales Engine dentro de cada carril; si un carril tiene menos, el otro completa hasta 10.
+   4. Portada limpia: nombre, monto · etapa · contacto y una sola acción por fila. El detalle (razones, Stockfish, avisos,
+      cotizaciones, compras con su fecha de corte, ficha técnica) pasa a la ficha como chips desplegables. */
+(function(){
+ if(window.hzV47)return;window.hzV47=true;
+ const dig=x=>String(x||'').replace(/\D/g,'');
+ let limpia={},cfg=null,anul=new Set(),dentro=0;
+ window.hzLimpia={docs:()=>limpia,cfg:()=>cfg};
+ /* 1. recompra sobre compras limpias */
+ const fl=window.hzFactLinesFor;
+ window.hzFactLinesFor=function(o){
+  if(dentro&&o){const id=o.facturacionId||dig(o.cuit),d=id&&limpia[id];if(d&&Array.isArray(d.lineas))return d.lineas.map(l=>({...l,tipo:'F'}));}
+  return typeof fl==='function'?fl.apply(this,arguments):[];
+ };
+ const fo=window.hzFinOrdersFor;
+ window.hzFinOrdersFor=function(){const r=typeof fo==='function'?fo.apply(this,arguments):[];return dentro&&anul.size?r.filter(p=>!anul.has(String(p.numero||''))):r};
+ const bp=hzBuyPattern;
+ hzBuyPattern=function(){dentro++;try{return bp.apply(this,arguments)}finally{dentro--}};
+ /* 2. cuenta compartida */
+ const compartida=o=>!!o&&o.cuentaCompartida==='si';
+ const pi=prioInfo;
+ prioInfo=function(o){if(compartida(o))return null;return pi.apply(this,arguments)};
+ const sinCompartidas=fn=>function(){if(typeof st==='undefined'||!Array.isArray(st.ops))return fn.apply(this,arguments);const all=st.ops;st.ops=all.filter(o=>!compartida(o));try{return fn.apply(this,arguments)}finally{st.ops=all}};
+ if(typeof hzBuyBoxHTML==='function')hzBuyBoxHTML=sinCompartidas(hzBuyBoxHTML);
+ if(typeof hzBuyHTML==='function')hzBuyHTML=sinCompartidas(hzBuyHTML);
+ /* 3. carriles */
+ const ONU=/\b(ont|onu)\b|ont\s*\/\s*onu|hg6\d{3}|an5506|eg8\d{3}|hs8\d{3}/i;
+ const carril=o=>{
+  const qs=typeof hzOpenDeals==='function'?hzOpenDeals(o):[];
+  if(qs.length)return qs.every(c=>ONU.test(String(c.familia||''))||ONU.test((c.items||[]).map(i=>i.articulo||i.producto||'').join(' ')))?'r':'c';
+  const ms=(st.mues||[]).filter(m=>m.oportunidadId===o.id&&typeof MACTIVA!=='undefined'&&MACTIVA.has(m.estado));
+  if(ms.length)return ms.every(m=>ONU.test(String(m.productos||'')))?'r':'c';
+  return hzDue(o)?'r':'c';
+ };
+ window.hzCarril=carril;
+ const er=hzEngineRank,memo=new WeakMap();
+ hzEngineRank=function(){
+  const r=er.apply(this,arguments);if(!r||!Array.isArray(r.ordered))return r;
+  if(memo.has(r))return memo.get(r);
+  const R=[],C=[],resto=[];let np=0;
+  for(const x of r.ordered){
+   const first=x.o.etapa==='prospecto'&&!lastContact(x.o);if(first&&np>=2)continue;
+   x.lane=carril(x.o);const L=x.lane==='r'?R:C;
+   if(L.length<5){L.push(x);if(first)np++}else if(resto.length<10){resto.push(x);if(first)np++}
+  }
+  const pick=[...R,...C];for(const x of resto){if(pick.length>=10)break;pick.push(x)}
+  pick.sort((a,b)=>(a.lane==='r'?0:1)-(b.lane==='r'?0:1));
+  const val={...r,pick,pickIds:new Set(pick.map(x=>x.o.id)),carriles:{r:pick.filter(x=>x.lane==='r').length,c:pick.filter(x=>x.lane==='c').length}};
+  memo.set(r,val);return val;
+ };
+ /* 4. portada limpia: cada fila muestra nombre, monto · etapa · contacto y una sola acción; el detalle va a la ficha (chips) */
+ const fmtF=f=>f?f.slice(8,10)+'/'+f.slice(5,7)+'/'+f.slice(0,4):'';
+ const E=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const accion=(o,p)=>{const t=today(),pf=o.proximaFecha;
+  const txt=o.proximaAccion?E(o.proximaAccion):'<span class="hint">'+E(((p&&p.R)||[]).filter(r=>!/^Borrador:|en juego/i.test(r))[0]||'Revisión de cuenta')+'</span>';
+  return '<div class="hz47-acc">'+txt+(pf&&pf<t?'<span class="venc">vencido '+E(pf.slice(8,10)+'/'+pf.slice(5,7))+'</span>':'')+'</div>'};
+ function decorar(){
+  if(typeof st==='undefined')return;
+  const eng=hzEngineRank();if(!eng||!eng.pick||!eng.pick.length)return;
+  const ids=eng.pick.map(x=>x.o.id);
+  const tabla=[...document.querySelectorAll('table.hz-sales-table')].find(t=>{const tr=t.querySelector('tbody tr[data-id]');return tr&&tr.dataset.id===ids[0]});
+  if(!tabla)return;tabla.dataset.hzV47='1';
+  const filas=[...tabla.querySelectorAll('tbody tr[data-id]')];
+  for(const tr of filas){const x=eng.pick.find(y=>y.o.id===tr.dataset.id);const c=tr.querySelector('td.hact');if(x&&c&&!c.dataset.hz47){c.dataset.hz47='1';c.innerHTML=accion(x.o,x.p)}}
+  if(!tabla.querySelector('.hz-lane-head'))for(const lane of ['r','c']){const n=eng.pick.filter(y=>y.lane===lane).length,x=eng.pick.find(y=>y.lane===lane);if(!x)continue;const tr=filas.find(f=>f.dataset.id===x.o.id);if(!tr)continue;
+   const h=document.createElement('tr');h.className='hz-lane-head '+lane;h.innerHTML='<td colspan="4"><span class="hz-lane-t">'+(lane==='r'?'Rápidas':'Consultivas')+'</span><span class="hz-lane-s">'+n+'</span></td>';tr.before(h)}
+ }
+ /* 5. ficha: chips desplegables con el detalle que sale de la portada */
+ function chipsHTML(o){
+  if(!o||!o.id)return '';
+  const out=[],ch=(cls,label,body)=>out.push('<details class="'+cls+'"><summary>'+label+'</summary><div class="hz47-body">'+body+'</div></details>');
+  const li=a=>'<ul>'+a.map(x=>'<li>'+x+'</li>').join('')+'</ul>';
+  if(compartida(o))ch('comp','Cuenta compartida',E(o.cuentaCompartidaCon||'La maneja otro vendedor')+'<div class="nota">No entra en la portada, la bandeja ni la recompra.</div>');
+  const eng=hzEngineRank(),pos=eng.pick.findIndex(x=>x.o.id===o.id),p=prioInfo(o);
+  if(p){const lane=carril(o);ch('','Por qué'+(pos>=0?' · #'+(pos+1)+' hoy':''),'<b>'+(lane==='r'?'Rápida':'Consultiva')+'</b> · puntaje de cierre '+p.s+' ('+E(p.nivel)+')'+li(p.R.map(E)))}
+  /* Stockfish: ya está en el panal de la ficha, con su desglose */
+  const ojo=[];try{const r=typeof hzTechnicalRisk==='function'&&hzTechnicalRisk(o);if(r)ojo.push(E(r))}catch(_){}
+  try{const m=window.hzV45Tope&&window.hzV45Tope(o);if(m)ojo.push('Cotización '+E(typeof fmtUSD==='function'?fmtUSD(m):m)+' abierta')}catch(_){}
+  try{if(window.hzV46Revisar&&window.hzV46Revisar(o).length)ojo.push('Revisar monto de cotización')}catch(_){}
+  if(ojo.length)ch('ojo','Ojo · '+ojo.length,li(ojo));
+  const qs=typeof hzQuoteList==='function'?hzQuoteList(o):[];
+  if(qs.length)ch('','Cotizaciones · '+qs.length,li(qs.map(c=>'<b>'+E(c.numero||'s/n')+'</b> · '+E(c.familia||'')+' · USD '+E(Math.round(Number(c.total)||0).toLocaleString('es-AR'))+' · '+E(c.estado||''))));
+  const bp=hzBuyPattern(o),corte=cfg&&cfg.corte;
+  if(bp){const est={toca:'le toca',atrasado:'atrasado',en_ciclo:'en ciclo',inactivo:'inactivo',dormido:'dormido',sin_patron:'sin ciclo claro'}[bp.status]||bp.status;
+   ch('','Compras · '+est,li([(bp.cycle?'Compra cada '+bp.cycle+' días':'Sin ciclo medible')+' · última '+E(fmtF(bp.last)),bp.next?'Próxima estimada '+E(fmtF(bp.next)):'',bp.foco?'Foco: '+E(bp.foco.nombre):'',(bp.productos||[]).length?'Compra: '+E(bp.productos.join(', ')):''].filter(Boolean))+'<div class="nota">'+(corte?'Datos de Finnegans al '+E(fmtF(corte))+' · notas de crédito descontadas, sin anticipos':'Compras sin limpiar (falta config/limpia)')+'</div>')}
+  let ft='';try{ft=typeof hzBridgeButtons==='function'?hzBridgeButtons(o):''}catch(_){}
+  if(ft&&ft.trim())ch('','Ficha técnica',ft);
+  return out.join('');
+ }
+ function pintarChips(){
+  const sh=document.getElementById('sheet');if(!sh||sh.hidden||typeof st==='undefined'||!st.cur)return;
+  let box=document.getElementById('hzV47Chips');
+  if(!box){box=document.createElement('div');box.id='hzV47Chips';const ref=document.getElementById('shSum');(ref||sh.querySelector('header')).after(box)}
+  const abiertos=new Set([...box.querySelectorAll('details[open] summary')].map(s=>s.textContent));
+  box.innerHTML=chipsHTML(st.cur);box.hidden=!box.innerHTML;
+  box.querySelectorAll('details').forEach(d=>{if(abiertos.has(d.querySelector('summary').textContent))d.open=true});
+ }
+ if(typeof openSheet==='function'){const os=openSheet;openSheet=function(){const r=os.apply(this,arguments);setTimeout(()=>{try{pintarChips()}catch(e){console.warn('[v47] chips',e)}},0);return r}}
+ const rd=render;
+ render=function(){const out=rd.apply(this,arguments);try{decorar()}catch(e){console.warn('[v47] carriles',e)}try{pintarChips()}catch(e){console.warn('[v47] chips',e)}return out};
+ /* 5. datos */
+ function bump(){window.hzFactVer=(window.hzFactVer||0)+1;try{if(typeof hzPatCache!=='undefined')hzPatCache.clear()}catch(_){}try{hzEngCache=null}catch(_){}try{if(typeof st!=='undefined'&&st.loaded)render()}catch(_){}}
+ (async()=>{const db=await window.claude?.use?.('db');if(!db)return;
+  db.collection('comprasLimpias').onSnapshot(snap=>{const d={};snap.docs.forEach(x=>{d[x.id]=x.data()||{}});limpia=d;bump()},()=>{});
+  db.collection('config').doc('limpia').onSnapshot(sn=>{const d=sn&&sn.exists===false?null:sn&&sn.data&&sn.data();cfg=d||null;anul=new Set((d&&d.pedidosAnulados)||[]);bump()},()=>{});
+ })();
+ try{hzEngCache=null;if(typeof st!=='undefined'&&st.loaded)render()}catch(_){}
+})();
+</script>
