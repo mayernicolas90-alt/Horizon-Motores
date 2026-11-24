@@ -19,6 +19,8 @@ Propuesta v4 (este script la calcula sobre la copia del CRM en Turso, sin tocar 
   · No entran: excluidas (no prospectar, otro vendedor, archivada), fichas archivadas, ganadas en posventa.
   · No repite la misma acción de ayer a la misma cuenta (lee se4_dia del día anterior).
 Escribe solo se4_dia (DEC-1124a). Uso: python3 -I laboratorio/sales_engine_v4.py correr|simular [--hoy AAAA-MM-DD] · --autotest
+    Recompra: no se llama al que acaba de comprar. Entra recién cuando pasaron 15 días y el 70 % de su ciclo
+    (pedido de Nicolás, 24/11: no llamar por recompra a quien acaba de comprar).
 """
 import datetime as D, importlib.util, json, os, re, sys
 
@@ -160,7 +162,7 @@ if __name__ == '__main__':
             crm[col][i] = json.loads(data or '{}')
         excl_cuit = {dig(r[0]) for r in q('SELECT cuit FROM cue_cuentas WHERE estado IN (?,?,?) AND cuit IS NOT NULL', EXCL)}
         excl_id = {r[0] for r in q('SELECT crm_id FROM cue_cuentas WHERE estado IN (?,?,?) AND crm_id IS NOT NULL', EXCL)}
-        red = [(dig(c), p) for c, p in q("SELECT cuit, puesto FROM red_pred WHERE politica='red_neuronal' AND puesto IS NOT NULL AND corte=(SELECT max(corte) FROM red_pred WHERE politica='red_neuronal') ORDER BY puesto")]
+        red = [(dig(c), p) for c, p in q("SELECT cuit, puesto FROM red_pred WHERE politica='red_neuronal' AND puesto IS NOT NULL AND corte=(SELECT max(corte) FROM red_pred WHERE politica='red_neuronal') AND dias_ult >= max(15, coalesce(ciclo, 0) * 0.7) ORDER BY puesto")]
         fh = {dig(r[0]) for r in q("SELECT DISTINCT cuit FROM limpia_compras_firmes WHERE marca LIKE '%iber%ome%' AND upper(subfamilia) LIKE 'ONU%' AND coalesce(otro_vendedor,0)=0")}
         ayer = {}
         try:

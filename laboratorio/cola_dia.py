@@ -11,6 +11,8 @@ vendedor, archivada) y las fichas archivadas no entran. Las ganadas no ocupan lu
 Lee crm (copia de 5SPm), red_pred, cue_cuentas, limpia_compras_firmes. Escribe solo cola_dia (DEC-1124a).
 La muestra `abrir` (sesión Loki); el resultado de cada contacto se carga en 5SPm con el «hacelo».
 Uso: python3 -I laboratorio/cola_dia.py correr [--hoy AAAA-MM-DD] · simular · --autotest
+    Recompra: no se llama al que acaba de comprar. Entra recién cuando pasaron 15 días y el 70 % de su ciclo
+    (pedido de Nicolás, 24/11: no llamar por recompra a quien acaba de comprar).
 """
 import datetime as D, importlib.util, json, os, re, sys
 
@@ -155,7 +157,7 @@ def leer(db, hoy):
         crm[col][i] = json.loads(data or '{}')
     excl_cuit = {dig(r[0]) for r in q("SELECT cuit FROM cue_cuentas WHERE estado IN (?,?,?) AND cuit IS NOT NULL", EXCL)}
     excl_id = {r[0] for r in q("SELECT crm_id FROM cue_cuentas WHERE estado IN (?,?,?) AND crm_id IS NOT NULL", EXCL)}
-    red = q("SELECT cuit, puesto FROM red_pred WHERE politica='red_neuronal' AND corte=(SELECT max(corte) FROM red_pred WHERE politica='red_neuronal') AND puesto IS NOT NULL ORDER BY puesto")
+    red = q("SELECT cuit, puesto FROM red_pred WHERE politica='red_neuronal' AND corte=(SELECT max(corte) FROM red_pred WHERE politica='red_neuronal') AND puesto IS NOT NULL AND dias_ult >= max(15, coalesce(ciclo, 0) * 0.7) ORDER BY puesto")
     fh = {dig(r[0]) for r in q("SELECT DISTINCT cuit FROM limpia_compras_firmes WHERE marca LIKE '%iber%ome%' AND upper(subfamilia) LIKE 'ONU%' AND coalesce(otro_vendedor,0)=0")}
     ayer = {}
     try:
