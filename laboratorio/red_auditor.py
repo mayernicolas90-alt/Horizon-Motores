@@ -6,15 +6,15 @@ y para cada política (red, regla de ciclo, más reciente, las de la sesión Lok
   aciertos_top10 · compradores entre los 10 primeros (sin excluidas por cue_cuentas)
   compradores    · cuántos clientes elegibles compraron en la ventana (el techo)
   cobertura      · aciertos_top10 / compradores
-Escribe solo red_eval (DEC-1124a). Veredicto por política contra el piso (regla_ciclo): GANA si en las últimas 4
+Escribe solo red_eval (DEC-1124a). Veredicto por política contra el piso (el mejor entre regla_ciclo y ref_reciente en cada corte): GANA si en las últimas 4
 ventanas completas promedia +1 comprador cada 10 o más, EMPATA si está entre 0 y +1, PIERDE si queda abajo.
 Uso: python3 -I laboratorio/red_auditor.py correr · --autotest
 """
 import datetime as D, importlib.util, json, os, sys
 
-VERSION = 'red_auditor 0.1 · 2026-11-24'
+VERSION = 'red_auditor 0.2 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
-PISO, META, VENTANAS = 'regla_ciclo', 1.0, 4
+PISOS, META, VENTANAS = ('regla_ciclo', 'ref_reciente'), 1.0, 4  # el piso es el mejor de los dos en cada corte
 COLS = ['corte', 'politica', 'horizonte', 'aciertos_top10', 'compradores', 'cobertura', 'elegibles', 'version', 'calculado']
 
 
@@ -39,12 +39,15 @@ def evaluar(pred, compras, ultimo, horizonte):
 
 def veredicto(evals, horizonte):
     filas = [e for e in evals if e['horizonte'] == horizonte]
-    cortes = sorted({e['corte'] for e in filas if e['politica'] == PISO})[-VENTANAS:]
+    cortes = sorted({e['corte'] for e in filas if e['politica'] in PISOS})[-VENTANAS:]
     if len(cortes) < VENTANAS:
         return {'estado': 'SIN_DATOS', 'detalle': f'{len(cortes)} de {VENTANAS} ventanas completas a {horizonte} días'}
-    piso = {e['corte']: e['aciertos_top10'] for e in filas if e['politica'] == PISO and e['corte'] in cortes}
+    piso = {}
+    for e in filas:
+        if e['politica'] in PISOS and e['corte'] in cortes:
+            piso[e['corte']] = max(piso.get(e['corte'], 0), e['aciertos_top10'])
     res = {}
-    for pol in sorted({e['politica'] for e in filas} - {PISO}):
+    for pol in sorted({e['politica'] for e in filas} - set(PISOS)):
         v = [e['aciertos_top10'] - piso[e['corte']] for e in filas if e['politica'] == pol and e['corte'] in piso]
         if len(v) < VENTANAS:
             continue
@@ -70,6 +73,8 @@ def autotest():
     ]
     ev4 = [dict(corte=f'2026-0{i}-01', politica=p, horizonte=30, aciertos_top10=a) for i in range(1, 5) for p, a in (('regla_ciclo', 4), ('red', 6))]
     casos.append(('+2 cada 10 en 4 ventanas: GANA', veredicto(ev4, 30)['red']['estado'] == 'GANA'))
+    ev5 = ev4 + [dict(corte=f'2026-0{i}-01', politica='ref_reciente', horizonte=30, aciertos_top10=6) for i in range(1, 5)]
+    casos.append(('el piso es el mejor de los dos: empata con «más reciente»', veredicto(ev5, 30)['red']['estado'] == 'EMPATA'))
     for t, ok in casos:
         print(('  OK    ' if ok else '  FALLA ') + t)
     ok = sum(x for _, x in casos)
