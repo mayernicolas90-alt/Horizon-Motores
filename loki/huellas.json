@@ -12,9 +12,11 @@
   },
   "loki.py": {
    "origen": "loki-sql/scripts/loki.py",
-   "huella": "b341d4080dc9",
-   "version": "v3.1",
-   "test": []
+   "huella": "3d8b1ec21510",
+   "version": "v3.2",
+   "test": [
+    "--autotest"
+   ]
   },
   "motor.py": {
    "origen": "loki-sql/scripts/motor.py",
