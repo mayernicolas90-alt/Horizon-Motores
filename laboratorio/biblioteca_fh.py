@@ -11,7 +11,8 @@ prod_pdf.jsonl, homologacion.jsonl (o .csv con encabezado), indice.json, vocabul
 Controles: cada archivo tiene que coincidir con el manifiesto en filas y sha256; si uno no cierra, no se carga nada.
 Nunca carga precios ni stock: se descartan las columnas cuyo nombre los nombra (eso entra por Finnegans y config/stock).
 Cada carga reemplaza entera la anterior y queda registrada en fh_cargas.
-Uso: python3 -I laboratorio/biblioteca_fh.py cargar CARPETA · verificar CARPETA · --autotest
+Uso: python3 -I laboratorio/biblioteca_fh.py desde_pm (lectura directa de horizon-msyer, token de solo lectura)
+     · cargar CARPETA · verificar CARPETA · --autotest
 """
 import csv, datetime as D, hashlib, importlib.util, io, json, os, re, sys, tempfile
 
@@ -127,6 +128,36 @@ def autotest():
     return 0 if k == len(casos) else 1
 
 
+PM_URL = 'https://horizon-msyer.aws-sa-east-1.turso.io/v2/pipeline'
+# tablas de producto de la base del PM (nunca clientes, cuentas, CRM, Finnegans, precios ni stock)
+DESDE_PM = {'prod': 'fh_prod', 'prod_spec': 'fh_spec', 'ficha_dato_vigente': 'fh_ficha_dato', 'prod_articulo': 'fh_articulo',
+            'prod_pdf': 'fh_pdf', 'alias': 'fh_alias', 'producto': 'fh_producto', 'hoja': 'fh_hoja', 'norma': 'fh_norma',
+            'norma_req': 'fh_norma_req', 'norma_cruce': 'fh_norma_cruce'}
+SIN_COLS = {'producto': {'isp', 'lista'}}           # columnas de precio de la lista
+FILA_PROHIBIDA = re.compile(r'precio|stock', re.I)   # renglones de dato técnico que en realidad son precio o stock
+
+
+def leer_pm(tabla):
+    """Solo lectura: un SELECT por tabla. El proxy de la sesión pone el token de lectura."""
+    import urllib.request
+    body = json.dumps({'requests': [{'type': 'execute', 'stmt': {'sql': f'SELECT * FROM {tabla}'}}, {'type': 'close'}]}).encode()
+    rq = urllib.request.Request(PM_URL, data=body, headers={'Content-Type': 'application/json', 'Authorization': 'Bearer proxy-injected'})
+    r = json.load(urllib.request.urlopen(rq, timeout=120))['results'][0]
+    if r['type'] != 'ok':
+        raise RuntimeError(f'{tabla}: {r}')
+    rr = r['response']['result']
+    cols = [c['name'] for c in rr['cols']]
+    return [dict(zip(cols, [v.get('value') for v in row])) for row in rr['rows']]
+
+
+def filtrar_pm(tabla, filas):
+    fuera = SIN_COLS.get(tabla, set())
+    out = [{k: v for k, v in f.items() if k not in fuera} for f in filas]
+    if 'atributo' in (out[0] if out else {}):
+        out = [f for f in out if not FILA_PROHIBIDA.search(str(f.get('atributo') or ''))]
+    return out
+
+
 def loki(ruta):
     sp = importlib.util.spec_from_file_location('loki_sql', ruta)
     m = importlib.util.module_from_spec(sp)
@@ -138,6 +169,28 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     if '--autotest' in a:
         sys.exit(autotest())
+    if a[:1] == ['desde_pm']:
+        datos, info = {}, {}
+        for t, destino in DESDE_PM.items():
+            datos[destino] = filtrar_pm(t, leer_pm(t))
+        q = []
+        for destino, filas in datos.items():
+            cols, vals, fuera = limpiar(filas)
+            info[destino] = dict(filas=len(vals), columnas=len(cols), descartadas=fuera)
+            q.append((f'DROP TABLE IF EXISTS {destino}', []))
+            if cols:
+                q.append((f'CREATE TABLE {destino}(' + ', '.join(f'"{c}"' for c in cols) + ')', []))
+                q += [(f'INSERT INTO {destino} VALUES(' + ','.join('?' * len(cols)) + ')', v) for v in vals]
+        db = loki(os.path.join(AQUI, '..', 'loki', 'loki_sql.py')).conectar()
+        for i in range(0, len(q), 400):
+            db.run(q[i:i + 400])
+        db.run([('CREATE TABLE IF NOT EXISTS fh_cargas(cargado, version, origen, exportado, commit_pm, tablas)', []),
+                ('INSERT INTO fh_cargas VALUES(?,?,?,?,?,?)', [D.datetime.now(D.timezone.utc).isoformat(timespec='seconds'), VERSION,
+                                                                'horizon-msyer (lectura directa)', None, None, json.dumps(info, ensure_ascii=False)])])
+        db.close()
+        print(json.dumps(info, ensure_ascii=False, indent=1))
+        print('RESUMEN cargada desde horizon-msyer')
+        sys.exit(0)
     if a[:1] in (['cargar'], ['verificar']) and len(a) > 1:
         res, prob = verificar(a[1])
         if prob or not res:
