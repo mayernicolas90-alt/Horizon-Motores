@@ -113,6 +113,14 @@
    "test": [
     "--autotest"
    ]
+  },
+  "publicador.py": {
+   "origen": "nuevo 24/11 (Publicador del datacenter, DEC-1124c/f)",
+   "huella": "79d8b16be815",
+   "version": "0.1",
+   "test": [
+    "--autotest"
+   ]
   }
  }
 }

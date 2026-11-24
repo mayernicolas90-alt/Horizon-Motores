@@ -14,6 +14,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 | `cuentas.py` | 0.1 | Motor **Cuentas** del datacenter: qué cuentas se trabajan según la regla D07 (leída de `k_regla`) y la copia del CRM (otro vendedor, no prospectar, compartida, archivada, unificada); CUIT ↔ ficha; deja los conflictos entre fuentes para definir. Escribe `cue_cuentas` | `--autotest` (11/11) |
 | `puntaje.py` | 0.2 | Motor **Puntaje** del datacenter: puntaje de cierre 0-100 por ficha con las reglas V143 del CRM, sobre la copia del CRM en Turso; recompra desde `rec_cliente` y exclusiones desde `cue_cuentas`; guarda `s` y `s_sin_monto` (monto aparte) y si es elegible hoy. Escribe `pun_fichas` | `--autotest` (10/10) |
 | `portada.py` | 0.1 | Motor **Portada** del datacenter: los 10 del día en una sola lista por puntaje con monto (decisión 24/11), con los dos tipos de venta (rápida: ONT/ONU y recompras · consultiva: cable, OLT, proyectos; mínimo 3 de cada uno si existen). Escribe `por_dia` | `--autotest` (7/7) |
+| `publicador.py` | 0.1 | **Publicador**: si el auditor dio PASA o AVISO (DEC-1124f), arma los documentos del CRM (`comprasLimpias`, `config/limpia`, `config/portada`, `config/puntajes`), deja solo lo que cambió en lotes de 50 con manifiesto (la guardia G02 deja pasar solo eso) y después verifica lo escrito contra Turso (`pub_envios`). Nunca toca fichas ni copia precios | `--autotest` (8/8) |
 | `auditar.py` | 1.1 | Audita un reporte de Finnegans contra el registro antes de cargarlo | — |
 | `memoria_check.py` | 1.0.0 | Aplica la memoria de cuentas (AJUSTAR / AVISO / BOX) a la apertura | `--autotest` (10/10) |
 | `bitacora2.py` | 0.1.0 | Bitácora 2: temas + eventos + chequeos contra CRM, R10 y stock | — |
@@ -25,7 +26,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 
 Turso es el datacenter: cada motor es un archivo independiente (`--contrato`, `--autotest`, `correr`) que lee tablas de Turso y escribe solo en las suyas.
 `dc.py correr --disparo finnegans` (al subir reportes) o `--disparo loki` (al escribir «Loki») corre los motores que correspondan; el auditor revisa cada corrida
-y, si da FALLA, no se publica nada. Motores: Limpieza (`importar.py`) y Recompra (`recompra.py`) con disparo finnegans; Cuentas (`cuentas.py`), Puntaje (`puntaje.py`) y Portada (`portada.py`) con disparo loki. Próximo: Publicador.
+y, si da FALLA, no se publica nada. Motores: Limpieza (`importar.py`) y Recompra (`recompra.py`) con disparo finnegans; Cuentas (`cuentas.py`), Puntaje (`puntaje.py`) y Portada (`portada.py`) con disparo loki; después, el Publicador (`publicador.py preparar` → Claude escribe los lotes con ArtifactData → `publicador.py verificar`).
 
 ## Dónde corre (desde el 22/11)
 
