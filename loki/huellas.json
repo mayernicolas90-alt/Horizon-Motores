@@ -4,8 +4,8 @@
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "40cf730b2370",
-   "version": "1.10.1",
+   "huella": "562430d11e83",
+   "version": "1.11.0",
    "test": [
     "--autotest"
    ]
@@ -67,16 +67,16 @@
    ]
   },
   "importar.py": {
-   "origen": "nuevo 23/11 (probado contra los reportes de Finnegans del 16-20/11 y la base de Loki)",
-   "huella": "6145ba6d9d84",
-   "version": "0.4",
+   "origen": "24/11: 0.5 = 0.3 de la puerta de entrada (cuentas ajenas desde el CRM, FALLA si falta >2 % contra la cabecera) + 0.4 del datacenter (sinónimos, correr desde Turso, NC con referencia primero, cantidad exacta)",
+   "huella": "1671581c7f54",
+   "version": "0.5",
    "test": [
     "--autotest"
    ]
   },
   "dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "8d52e62ab86b",
+   "huella": "01f711f42251",
    "version": "0.6",
    "test": [
     "--autotest"
@@ -116,8 +116,16 @@
   },
   "auditor_dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/c) · renombrado a auditor_dc.py (24/11)",
-   "huella": "407190d1e763",
+   "huella": "01e3031aee35",
    "version": "0.5",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "auditor.py": {
+   "origen": "nuevo 23/11 (Fase 1 del plan «auditor de entrada», PR #12): recibir, clasificar, verificar y publicar los reportes de Finnegans",
+   "huella": "d2b8f4eff626",
+   "version": "0.1",
    "test": [
     "--autotest"
    ]

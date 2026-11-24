@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""importar.py · Filtro de limpieza de reportes de Finnegans (prototipo 23/11/2026)
+"""importar.py · Filtro de limpieza de reportes de Finnegans (0.3, 23/11/2026)
+
+0.3: (1) las cuentas ajenas (otro vendedor, no prospectar, cuentas fuera) salen del CRM (--crm, obligatorio), no de una
+     lista fija: la 0.2 marcaba Swissnet y Luna Net, que son de Nicolás, y no marcaba TPP. (2) Reporte incompleto = FALLA:
+     si a los renglones les falta más del 2 % de los comprobantes de la cabecera hasta su corte, no se usa ni se sube
+     (caso 23/11: GIANNINA3 con 468 de 873 comprobantes, sin Nodo Net, Iplus, Reltid ni Luna Net). Salida 1 = FALLA.
 
 Arma una base limpia de compras firmes antes de que la usen los motores (recompra, carriles, Stockfish).
 NO escribe en Turso ni en el CRM: deja una base SQLite local (mismo formato que Turso) y un resumen.
@@ -27,21 +32,80 @@ Qué hace:
 
 Uso:
   python3 -I importar.py --base salida.sqlite --renglones R14.csv --renglones R24.csv \
-      --extra loki_ventas.jsonl --cabecera R22.csv --pedidos R19.csv [--desde 2024-01-01]
+      --extra loki_ventas.jsonl --cabecera R22.csv --pedidos R19.csv --crm <export CRM> [--desde 2024-01-01]
 """
 import argparse, collections, csv, datetime as D, hashlib, json, os, re, sqlite3, sys, unicodedata
 
-VERSION = 'importar 0.4 · 2026-11-24'
+VERSION = 'importar 0.5 · 2026-11-24'   # 0.5 = 0.3 de la puerta de entrada (cuentas ajenas del CRM, FALLA si falta >2 %) + 0.4 del datacenter
 EMPRESA = 'HORIZON TRADING S.A.'
 TOL_DESCUENTO = 0.05   # pedido vs. factura con descuento contado (Sampacho 19/11: 1.256 → 1.218,32)
 TABLAS = ('fuentes', 'comprobantes', 'renglones', 'vinculos_nc', 'revisar', 'faltan_renglones', 'pedidos')
 NOPROD = re.compile(r'descuento|anticipo|intereses|servicios? admin|gastos de admin|flete|licencia|hi-care|'
                     r'series basic sw|upgrade rtu|diferencia de cambio|honorarios|muestras? de producto', re.I)
 ANTICIPO = re.compile(r'anticipo', re.I)
-# cuentas que no son de Nicolás (skill horizon-crm, 28/10): se marcan, no se borran
-OTROS = re.compile(r'pogliotti|asociaci[oó]n mutual mercantil|\bamma\b|\bitsa\b|obercom|wiltel|gigared|'
-                   r'generaci[oó]n wi.?fi|astesano|itc comunicaciones|ax internet|fibrazo|tv music|'
-                   r'support internet|itelsa|comworks|luna net|fesacom|swissnet|super ?canal|\bsion s', re.I)
+MAX_FALTAN = 0.02      # 0.3: si a los renglones les falta más del 2 % de los comprobantes de la cabecera (hasta su corte), FALLA
+# 0.3: las cuentas que no son de Nicolás (otro vendedor o fuera) salen del CRM, no de una lista fija (la 0.2 marcaba
+# Swissnet y Luna Net, que son de Nicolás, y no marcaba TPP). Se marcan, no se borran.
+SUFIJOS = re.compile(r'\b(s ?a ?s|s ?r ?l|s ?a ?u|s ?a|s ?a ?p ?e ?m|ltda|limitada|cv)\b')
+
+
+def clave_nombre(s):
+    return re.sub(r'\s+', ' ', SUFIJOS.sub(' ', re.sub(r'[^a-z0-9 ]', ' ', norm(s)))).strip()
+
+
+class Ajenas:
+    """Cuentas que no son de Nicolás, por CUIT (D03) y, solo si el comprobante no trae CUIT, por nombre.
+    Fuente: fichas del CRM (otroVendedor, noProspectar) + datacenter/restricciones (cuentasFuera; cuentasDeNicolas manda)."""
+
+    def __init__(self, crm):
+        self.cuit, self.nombre, self.propias = {}, {}, set()
+        ops = os.path.join(crm or '', 'oportunidades')
+        if not crm or not os.path.isdir(ops) or not os.listdir(ops):
+            raise SystemExit('FALLA · falta --crm con oportunidades/ (export del CRM): sin las marcas de otro vendedor '
+                             'y cuentas fuera no se corre con listas vacías.')
+        def cuits(o):
+            return {dig(x) for x in [o.get('cuit'), o.get('facturacionId')] +
+                    [c.get('cuit') if isinstance(c, dict) else c for c in (o.get('cuitsAdicionales') or [])] if len(dig(x)) in (8, 11)}
+        self.fichas = 0
+        for f in sorted(os.listdir(ops)):
+            if not f.endswith('.json'):
+                continue
+            o = json.load(open(os.path.join(ops, f), encoding='utf-8'))
+            o = o.get('data', o) if isinstance(o.get('data'), dict) else o
+            self.fichas += 1
+            motivo = ('otro vendedor' if o.get('otroVendedor') in (True, 'si') else
+                      'no prospectar' if o.get('noProspectar') == 'si' else None)
+            if motivo:
+                for c in cuits(o):
+                    self.cuit[c] = motivo
+                if o.get('empresa'):
+                    self.nombre[clave_nombre(o['empresa'])] = motivo
+        rp = os.path.join(crm, 'datacenter', 'restricciones.json')
+        if os.path.exists(rp):
+            r = json.load(open(rp, encoding='utf-8'))
+            r = r.get('data', r) if isinstance(r.get('data'), dict) else r
+            for v in (r.get('cuentasFuera') or {}).values():
+                if len(dig(v.get('cuit'))) == 11:
+                    self.cuit[dig(v['cuit'])] = 'cuenta fuera'
+                if v.get('empresa'):
+                    self.nombre[clave_nombre(v['empresa'])] = 'cuenta fuera'
+            for v in (r.get('cuentasDeNicolas') or {}).values():
+                if len(dig(v.get('cuit'))) == 11:
+                    self.propias.add(dig(v['cuit']))
+        self.por_nombre = {}   # nombre del comprobante -> CUIT (lo aprende de los renglones)
+
+    def aprender(self, cliente, cuit):
+        if cliente and len(dig(cuit)) in (8, 11):
+            self.por_nombre.setdefault(clave_nombre(cliente), dig(cuit))
+
+    def es(self, cliente, cuit=None):
+        c = dig(cuit) or self.por_nombre.get(clave_nombre(cliente), '')
+        if c:
+            if c in self.propias:
+                return 0
+            if c in self.cuit:
+                return 1
+        return int(clave_nombre(cliente) in self.nombre)
 
 
 def norm(s):
@@ -141,7 +205,11 @@ def main(argv=None):
     ap.add_argument('--cabecera')
     ap.add_argument('--pedidos')
     ap.add_argument('--desde', default='2024-01-01')
+    ap.add_argument('--crm', help='carpeta del export del CRM (ArtifactData out_dir): oportunidades/ y datacenter/restricciones.json')
+    ap.add_argument('--max-faltan', type=float, default=MAX_FALTAN,
+                    help='proporción máxima de comprobantes de la cabecera sin renglones (hasta el corte) antes de dar FALLA')
     a = ap.parse_args(argv)
+    AJ = Ajenas(a.crm)
 
     if os.path.exists(a.base):
         os.remove(a.base)
@@ -169,6 +237,8 @@ def main(argv=None):
             if tid in comp and tid not in nuevos:
                 continue          # ya lo trajo una fuente anterior: no se duplica
             nuevos.add(tid)
+            cuit_r = r.get('Nrodeidentificacion') or r.get('Nro de identificación') or ''   # 0.3: el export viejo trae el otro encabezado
+            AJ.aprender(r.get('Cliente'), cuit_r)
             comp.setdefault(tid, dict(tid=tid, fecha=f, tipo=tipo_doc(r.get('Documento')), documento=r.get('Documento'),
                                       comprobante=r.get('Comprobante'), cliente=(r.get('Cliente') or '').strip(),
                                       cuit=dig(col(r, 'Nrodeidentificacion')), descripcion=r.get('Descripción') or '',
@@ -202,7 +272,7 @@ def main(argv=None):
             c = cab_idx.get((norm(r['documento']), r['comprobante'], norm(r['cliente'])))
             if not c:
                 db.execute('INSERT INTO revisar VALUES(?,?,?,?,?,?)', (None, r['fecha'], r['cliente'], 'renglón de Loki sin cabecera',
-                           f"{r['documento']} {r['comprobante']}", int(bool(OTROS.search(r['cliente'])))))
+                           f"{r['documento']} {r['comprobante']}", AJ.es(r['cliente'], r.get('cuit'))))
                 continue
             tid = c['TransaccionID']
             if tid in comp and comp[tid]['fuente'] != 'loki':
@@ -284,7 +354,7 @@ def main(argv=None):
     for t in con_ref + [t for t in todas if t not in set(con_ref)]:
         c = comp[t]
         prod = [l for l in lineas[t] if l['clase'] in ('producto', 'anticipo')]
-        ov = int(bool(OTROS.search(c['cliente'])))
+        ov = AJ.es(c['cliente'], c['cuit'])
         # a) referencia escrita
         cand = refs(t)
         if len(cand) == 1:
@@ -330,20 +400,37 @@ def main(argv=None):
     # 5. guardar
     for t, c in comp.items():
         db.execute('INSERT INTO comprobantes VALUES(?,?,?,?,?,?,?,?,?,?,?)', (t, c['fecha'], c['tipo'], c['documento'], c['comprobante'],
-                   c['cliente'], c['cuit'], c['descripcion'], c['motivo'], c['fuente'], int(bool(OTROS.search(c['cliente'])))))
+                   c['cliente'], c['cuit'], c['descripcion'], c['motivo'], c['fuente'], AJ.es(c['cliente'], c['cuit'])))
         for l in lineas[t]:
             db.execute('INSERT INTO renglones(tid,producto,producto_n,clase,cantidad,cantidad_neta,marca,familia,subfamilia,moneda) '
                        'VALUES(?,?,?,?,?,?,?,?,?,?)', (t, l['producto'], l['producto_n'], l['clase'], l['cantidad'],
                        round(l['neta'], 4), l['marca'], l['familia'], l['subfamilia'], l['moneda']))
 
-    # 6. control con la cabecera
+    # 6. control con la cabecera (0.3: hasta el corte de los renglones mide completitud; después del corte solo informa)
+    falla = []
     if cab:
+        en_corte = faltan_corte = 0
         for r in cab:
-            if r['Fecha'][:10] < a.desde or tipo_doc(r['Documento']) == 'DC' or r['TransaccionID'] in comp:
+            if (r.get('Empresa') or EMPRESA) != EMPRESA or r['Fecha'][:10] < a.desde or tipo_doc(r['Documento']) == 'DC':
                 continue
-            ov = int(bool(OTROS.search(r['Cliente'])))
+            dentro = bool(corte_renglones) and r['Fecha'][:10] <= corte_renglones
+            en_corte += dentro
+            if r['TransaccionID'] in comp:
+                continue
+            ov = AJ.es(r['Cliente'])
             db.execute('INSERT INTO faltan_renglones VALUES(?,?,?,?,?,?)', (r['TransaccionID'], r['Fecha'][:10], r['Documento'], r['Nro comp'], r['Cliente'], ov))
-            resumen['comprobantes sin renglones' + (' (otro vendedor)' if ov else '')] += 1
+            if dentro:
+                faltan_corte += 1
+                resumen['comprobantes sin renglones' + (' (cuenta ajena)' if ov else '')] += 1
+            else:
+                resumen['comprobantes posteriores al corte de los renglones (se esperan en la próxima carga)'] += 1
+        prop = faltan_corte / en_corte if en_corte else 0.0
+        if prop > a.max_faltan:
+            falla.append(f'a los renglones les faltan {faltan_corte} de {en_corte} comprobantes de la cabecera hasta el '
+                         f'{corte_renglones} ({prop:.1%} > {a.max_faltan:.0%}): el reporte vino incompleto (¿filtro de cliente o '
+                         f'«Visualizar todas» sin tildar?). No se usa.')
+    elif a.subir_turso:
+        falla.append('sin --cabecera no se puede controlar que los renglones estén completos: no se sube.')
 
     # 7. pedidos sin factura
     if a.pedidos and cab:
@@ -420,7 +507,15 @@ def main(argv=None):
     print(f'  renglones de compra firmes {n_firmes} · renglones anulados del todo {n_anul} · renglones de anticipo {n_ant}')
     for k, v in sorted(resumen.items()):
         print(f'  {k}: {v}')
+    print(f'  cuentas ajenas desde el CRM: {len(AJ.cuit)} CUIT ({AJ.fichas} fichas leídas) · propias por dictado: {len(AJ.propias)}')
     db.close()
+    if falla:
+        for f in falla:
+            print('  ✗ ' + f)
+        print('Importador: FALLA')
+        resumen['_falla'] = len(falla)
+        return resumen
+    print('Importador: PASA')
     if a.subir_turso:
         subir_turso(a.base, a.loki)
     return resumen
@@ -482,12 +577,20 @@ def correr_desde_turso(loki=None):
     db.close()
     if 'R10.csv' not in rutas:
         raise SystemExit('FALLA: falta R10.csv (facturación por renglón) en la tabla archivos')
-    argv = ['--base', os.path.join(d, 'limpia.sqlite'), '--renglones', rutas['R10.csv'], '--subir-turso', '--loki', ruta]
+    # 0.5: las cuentas ajenas salen del CRM (copia del CRM en Turso, tabla crm) → carpeta oportunidades/ como el export
+    db = L.conectar()
+    ops = os.path.join(d, 'crm', 'oportunidades'); os.makedirs(ops)
+    for i, data in db.run([("SELECT id, data FROM crm WHERE coleccion = 'oportunidades'", [])])[0][1]:
+        open(os.path.join(ops, i + '.json'), 'w', encoding='utf-8').write(data or '{}')
+    db.close()
+    argv = ['--base', os.path.join(d, 'limpia.sqlite'), '--renglones', rutas['R10.csv'], '--subir-turso', '--loki', ruta, '--crm', os.path.join(d, 'crm')]
     if 'R23.csv' in rutas:
         argv += ['--cabecera', rutas['R23.csv']]
         if 'R24.csv' in rutas:
             argv += ['--pedidos', rutas['R24.csv']]
     res = main(argv)
+    if res.get('_falla'):
+        raise SystemExit('FALLA · reporte incompleto contra la cabecera: no se subió nada (' + json.dumps({k: v for k, v in res.items()}, ensure_ascii=False)[:300] + ')')
     return {k: v for k, v in res.items()}
 
 
@@ -527,7 +630,19 @@ def autotest():
         # 6 NC de producto sin factura posible: a revisar
         ['14', '2026-06-01', NC, 'A-00005-00000024', 'Cliente V', '30-55555555-5', '', '', 'Ont C', '-5', '', '', '', 'Dólares', H],
     ]
+    # 7 (0.3) Swissnet es de Nicolás: la lista fija de la 0.2 la marcaba como otro vendedor
+    ren.append(['15', '2026-10-01', FA, 'A-00005-00001050', 'Swissnet SRL', '30-66666666-6', '', '', 'Drop', '1000', 'FH', 'FIBRA OPTICA', 'DROP', 'Dólares', H])
     r1 = esc('ren.csv', RC, ren)
+    crm = os.path.join(d, 'crm')
+    os.makedirs(os.path.join(crm, 'oportunidades')); os.makedirs(os.path.join(crm, 'datacenter'))
+    def ficha(i, o):
+        json.dump(o, open(os.path.join(crm, 'oportunidades', i + '.json'), 'w', encoding='utf-8'))
+    ficha('y', dict(empresa='Cliente Y', cuit='30-22222222-2', otroVendedor=True))           # otro vendedor (caso TPP)
+    ficha('w', dict(empresa='Cliente W', cuit='30-44444444-4', noProspectar='si'))           # dictado: es de Nicolás
+    ficha('s', dict(empresa='Swissnet', cuit='30-66666666-6'))
+    json.dump(dict(cuentasFuera={'v': dict(cuit='30555555555', empresa='Cliente V')},
+                   cuentasDeNicolas={'w': dict(cuit='30444444444', empresa='Cliente W')}),
+              open(os.path.join(crm, 'datacenter', 'restricciones.json'), 'w', encoding='utf-8'))
     cab = esc('cab.csv', ['TransaccionID', 'Fecha', 'Documento', 'Nro comp', 'Cliente', 'Bruto', 'Descripción'], [
         ['4', '2026-10-20', FA, 'A-00005-00001021', 'Cliente Y', '100', ''],
         ['9', '2026-09-01', FA, 'A-00005-00001040', 'Cliente W', '970', ''],
@@ -537,8 +652,9 @@ def autotest():
     base = os.path.join(d, 'b.sqlite')
     import contextlib, io
     with contextlib.redirect_stdout(io.StringIO()):
-        main(['--base', base, '--renglones', r1, '--cabecera', cab, '--pedidos', ped])
+        res1 = main(['--base', base, '--renglones', r1, '--cabecera', cab, '--pedidos', ped, '--crm', crm])
     db = sqlite3.connect(base)
+    ajena = lambda tid: db.execute('SELECT otro_vendedor FROM comprobantes WHERE tid=?', (tid,)).fetchone()[0]
     firme = lambda tid: db.execute('SELECT coalesce(sum(cantidad_neta),0) FROM compras_firmes WHERE tid=?', (tid,)).fetchone()[0]
     vinc = lambda nc: db.execute('SELECT factura_tid, metodo, alcance FROM vinculos_nc WHERE nc_tid=?', (nc,)).fetchone()
     ped_e = lambda n: db.execute('SELECT estado FROM pedidos WHERE nro=?', (n,)).fetchone()[0]
@@ -555,11 +671,16 @@ def autotest():
         ('pedido con factura del mismo monto', ped_e('P-1') == 'facturado'),
         ('pedido con descuento contado (hasta 5 %)', ped_e('P-2') == 'facturado con descuento'),
         ('pedido sin factura queda pendiente', ped_e('P-3') == 'pendiente de confirmar'),
+        ('0.3 otro vendedor sale de la ficha del CRM (caso TPP)', ajena('3') == 1 and ajena('4') == 1),
+        ('0.3 Swissnet es de Nicolás: no se marca como ajena', ajena('15') == 0),
+        ('0.3 cuenta fuera por CUIT desde restricciones', db.execute("SELECT otro_vendedor FROM revisar WHERE tid='14'").fetchone()[0] == 1),
+        ('0.3 cuentasDeNicolas manda sobre noProspectar', ajena('9') == 0),
+        ('0.3 reporte incompleto (1 de 3 sin renglones) da FALLA', bool(res1.get('_falla'))),
     ]
     db.close()
     base2 = os.path.join(d, 'b2.sqlite')
     with contextlib.redirect_stdout(io.StringIO()):
-        main(['--base', base2, '--renglones', r1, '--renglones', r1, '--cabecera', cab, '--pedidos', ped])
+        main(['--base', base2, '--renglones', r1, '--renglones', r1, '--cabecera', cab, '--pedidos', ped, '--crm', crm])
     a_, b_ = sqlite3.connect(base), sqlite3.connect(base2)
     igual = all(a_.execute(f'SELECT * FROM {t} ORDER BY 1').fetchall() == b_.execute(f'SELECT * FROM {t} ORDER BY 1').fetchall()
                 for t in ('comprobantes', 'vinculos_nc', 'pedidos')) and \
@@ -572,9 +693,9 @@ def autotest():
     ped2 = esc('ped2.csv', ['Fecha', 'Comprobante', 'Cliente', 'Bruto', 'Producto', 'Empresa'], [
         ['2026-10-19', 'P-1', 'Cliente Y', '60', 'Ont B', H], ['2026-10-19', 'P-1', 'Cliente Y', '40', 'Ont B', H],
         ['2026-11-10', 'P-9', 'Cliente Y', '5', 'Ont B', 'SUR TECHNOLOGY S.A.']])
-    base3 = os.path.join(d, 'b3.sqlite')
+    base3 = os.path.join(d, 'b3r10.sqlite')
     with contextlib.redirect_stdout(io.StringIO()):
-        main(['--base', base3, '--renglones', r2, '--cabecera', cab, '--pedidos', ped2])
+        main(['--base', base3, '--renglones', r2, '--cabecera', cab, '--pedidos', ped2, '--crm', crm])
     c3 = sqlite3.connect(base3)
     casos.append(('columnas con otro nombre (formato R10) dan el mismo resultado',
                   c3.execute('SELECT tid, cuit, fecha FROM comprobantes ORDER BY 1').fetchall() == a_.execute('SELECT tid, cuit, fecha FROM comprobantes ORDER BY 1').fetchall()
@@ -596,15 +717,28 @@ def autotest():
         ['49', '2026-05-02', NC, 'A-00005-00000386', 'Cliente Q', '30-88888888-8', 'Anula FC 1580', '', 'Caja', '-8', '', '', '', 'Dólares', H],
     ]
     r4 = esc('ren4.csv', RC, ren4)
-    base4 = os.path.join(d, 'b4.sqlite')
+    base4 = os.path.join(d, 'b4nc.sqlite')
     with contextlib.redirect_stdout(io.StringIO()):
-        main(['--base', base4, '--renglones', r4])
+        main(['--base', base4, '--renglones', r4, '--crm', crm])
     c4 = sqlite3.connect(base4)
     f4 = lambda tid: c4.execute('SELECT coalesce(sum(cantidad_neta),0) FROM compras_firmes WHERE tid=?', (tid,)).fetchone()[0]
     casos.append(('NC que cita su factura va primero: dos facturas iguales y dos NC quedan anuladas las dos', f4('41') == 0 and f4('42') == 0))
     casos.append(('desempate por cantidad exacta: la NC de 43 anula la factura de 43', f4('46') == 0 and f4('45') == 300))
     casos.append(('NC que excede lo que queda de su factura va a revisar', c4.execute("SELECT count(*) FROM revisar WHERE tid='49' AND motivo LIKE 'NC excede%'").fetchone()[0] == 1))
     c4.close()
+    cab_ok = esc('cab_ok.csv', ['TransaccionID', 'Fecha', 'Documento', 'Nro comp', 'Cliente', 'Bruto', 'Descripción'], [
+        ['4', '2026-10-20', FA, 'A-00005-00001021', 'Cliente Y', '100', ''], ['9', '2026-09-01', FA, 'A-00005-00001040', 'Cliente W', '970', ''],
+        ['98', '2026-11-20', FA, 'A-00005-00001098', 'Cliente U', '50', '']])
+    with contextlib.redirect_stdout(io.StringIO()):
+        res3 = main(['--base', os.path.join(d, 'b3.sqlite'), '--renglones', r1, '--cabecera', cab_ok, '--crm', crm])
+    casos.append(('0.3 completo hasta el corte da PASA (lo posterior al corte solo se informa)', not res3.get('_falla')))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(['--base', os.path.join(d, 'b4.sqlite'), '--renglones', r1])
+        sin_crm = False
+    except SystemExit as e:
+        sin_crm = 'FALLA' in str(e)
+    casos.append(('0.3 sin --crm no corre (no hay listas vacías)', sin_crm))
     ok = sum(1 for _, c in casos if c)
     for t, c in casos:
         print(('  OK   ' if c else '  FALLA ') + t)
@@ -622,4 +756,4 @@ if __name__ == '__main__':
         r = correr_desde_turso(next((sys.argv[i + 1] for i, x in enumerate(sys.argv) if x == '--loki'), None))
         print('RESUMEN ' + json.dumps(r, ensure_ascii=False))
         sys.exit(0)
-    main()
+    sys.exit(1 if main().get('_falla') else 0)
