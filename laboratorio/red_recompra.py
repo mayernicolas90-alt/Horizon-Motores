@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""red_recompra.py 0.1 · laboratorio (24/11/2026) · ¿quién compra en los próximos 30 días?
+"""red_recompra.py 0.2 · laboratorio (24/11/2026) · ¿quién compra en los próximos 30 días?
 
-Experimento, no motor: lee Turso (solo lectura) y no escribe en ningún lado.
+Experimento, no motor. La prueba hacia atrás solo lee Turso; «pronosticar» escribe únicamente su tabla nn_pronostico.
 Arma "fotos" del pasado: en cada fecha de corte, para cada cliente que ya compró, calcula rasgos con lo que se sabía
 hasta ese día y mira si compró en los 30 días siguientes. Con esas fotos entrena y compara:
   · referencia A: más días sin comprar primero (la que propone ChatGPT)
@@ -12,7 +12,8 @@ hasta ese día y mira si compró en los 30 días siguientes. Con esas fotos entr
 Separación temporal: entrena con cortes hasta FIN_TRAIN y evalúa con los cortes posteriores (nunca ve el futuro).
 Métrica principal: aciertos en el top 10 por corte (lo que entra en la portada). También AUC.
 
-Uso: python3 -I laboratorio/red_recompra.py [--loki loki/loki_sql.py] [--json salida.json]
+Uso: python3 -I laboratorio/red_recompra.py [--loki ruta] [--json salida.json]   (prueba hacia atrás, no escribe)
+     python3 -I laboratorio/red_recompra.py pronosticar [--hoy AAAA-MM-DD]       (guarda la lista de hoy en nn_pronostico)
 Límite conocido: las NC se aplican con lo que se sabe hoy (no hay fecha de disponibilidad), así que la evaluación es
 retrospectiva y algo optimista. El CRM no guarda historia de estados, por eso no entra al entrenamiento.
 """
@@ -164,9 +165,56 @@ def top10(filas, puntaje):
                 cobertura=round(float(np.sum(ac)) / max(float(np.sum(comp)), 1), 3))
 
 
+COLS_P = ['corte', 'cuit', 'politica', 'puesto', 'puntaje', 'dias_ult', 'ciclo', 'proxima', 'excluida', 'version', 'calculado']
+TABLA_P = 'nn_pronostico'
+
+
+def pronosticar(db, hoy):
+    """Guarda la lista de hoy de cada política en nn_pronostico (tabla propia, DEC-1124a). Una corrida por día:
+    si ya hay filas de ese corte y versión, se reemplazan. Se mide a los 30 días contra limpia_compras_firmes."""
+    compras = leer(db)
+    excl = {r[0] for r in db.run([('SELECT cuit FROM cue_cuentas WHERE trabajar = 0 AND cuit IS NOT NULL', [])])[0][1]}
+    F = fotos(compras, max(c[0] for cs in compras.values() for c in cs))
+    X = np.array([f['x'] for f in F]); y = np.array([f['y'] for f in F], float)
+    H = []
+    for cuit, cs in compras.items():
+        hist = [c for c in cs if c[0] <= hoy]
+        if hist:
+            x, ciclo, ult = rasgos(hist, hoy)
+            prox = (ult + D.timedelta(days=round(ciclo))) if ciclo else None
+            H.append(dict(cuit=cuit, x=x, ciclo=ciclo, dias_ult=(hoy - ult).days, prox=prox))
+    Xs, Xh = estandarizar(X, np.array([h['x'] for h in H]))
+    pol = {'red_neuronal': np.mean([red(Xs, y, capas=(8,), l2=0.1, epocas=100, semilla=s)(Xh) for s in range(5)], 0),
+           'regla_ciclo': -np.array([abs((h['prox'] - hoy).days) if h['prox'] else 10 ** 6 for h in H], float),
+           'ref_reciente': -np.array([h['dias_ult'] for h in H], float)}
+    ahora = D.datetime.now(D.timezone.utc).isoformat(timespec='seconds')
+    filas = []
+    for nombre, s in pol.items():
+        orden = sorted(range(len(H)), key=lambda i: (-s[i], H[i]['cuit']))
+        puesto = 0
+        for i in orden:
+            ex = H[i]['cuit'] in excl
+            puesto += 0 if ex else 1
+            filas.append([hoy.isoformat(), H[i]['cuit'], nombre, None if ex else puesto, float(s[i]), H[i]['dias_ult'],
+                          H[i]['ciclo'], H[i]['prox'].isoformat() if H[i]['prox'] else None, int(ex), VERSION, ahora])
+    db.run([(f'CREATE TABLE IF NOT EXISTS {TABLA_P}(' + ', '.join(COLS_P) + ')', []),
+            (f'DELETE FROM {TABLA_P} WHERE corte = ? AND version = ?', [hoy.isoformat(), VERSION])]
+           + [(f'INSERT INTO {TABLA_P} VALUES(' + ','.join('?' * len(COLS_P)) + ')', f) for f in filas])
+    return dict(corte=hoy.isoformat(), clientes=len(H), excluidos=len(excl & {h['cuit'] for h in H}), filas=len(filas))
+
+
+VERSION = 'red_recompra 0.2'
+
+
 def main(a):
     ruta = a[a.index('--loki') + 1] if '--loki' in a else os.path.join(AQUI, '..', 'loki', 'loki_sql.py')
     db = loki(ruta).conectar()
+    if a[:1] == ['pronosticar']:
+        hoy = D.date.fromisoformat(a[a.index('--hoy') + 1]) if '--hoy' in a else D.datetime.now(D.timezone(D.timedelta(hours=-3))).date()
+        r = pronosticar(db, hoy)
+        db.close()
+        print('RESUMEN ' + json.dumps(r, ensure_ascii=False))
+        return
     compras = leer(db)
     db.close()
     ultimo = max(c[0] for cs in compras.values() for c in cs)
