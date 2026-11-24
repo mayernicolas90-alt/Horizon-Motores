@@ -21,7 +21,7 @@ Escribe en la base de Loki: `entrar` solo en sus tablas (entrada, entrada_contro
 """
 import csv, datetime as D, hashlib, importlib.util, io, json, os, re, sys, tempfile, unicodedata
 
-VERSION = 'auditor 0.1 · 2026-11-23'
+VERSION = 'auditor 0.2 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -52,6 +52,7 @@ RENGLONES = {'R6', 'R7', 'R10'}            # Análisis de Facturación por rengl
 CABECERA = {'R23', 'R4', 'R15'}           # comprobantes de venta, cabecera
 ALIAS = {'indentificaciontributaria': 'identificaciontributaria'}   # error de tipeo de Finnegans en un formato
 MAX_FALTAN = 0.02
+EMPRESA = 'HORIZON TRADING'   # 0.2: la tabla ventas (R10) se arma solo con los renglones de esta empresa
 
 
 def ahora():
@@ -267,26 +268,28 @@ def publicar(db, lote, hacelo):
     for e in ents:
         if e['estado'] != 'verificada' or not e['codigo']:
             continue
-        destinos = [(e['codigo'], e['texto'])]
+        destinos = [(e['codigo'], e['texto'], e['filas'])]
         if e['clase'] == 'facturacion_renglones' and 'R10' in reg and e['codigo'] != 'R10':
-            destinos.append(('R10', renombrar(e['texto'], reg['R10'])))   # la tabla ventas sale del formato R10
-        for cod, texto in destinos:
+            # la tabla ventas sale del formato R10 y solo con los renglones de Horizon (0.2: como venía cargada, 1.219 al 20/11)
+            destinos.append(('R10',) + renombrar(e['texto'], reg['R10'], EMPRESA))
+        for cod, texto, nf in destinos:
             p = os.path.join(d, cod + '.csv')
             open(p, 'w', encoding='utf-8', newline='').write(texto)
             meta = dict(archivo=f"{e['nombre']} (auditor, entrada {e['id']}, lote {lote})", corte=e['corte'], fecha=hoy(),
-                        filas=e['filas'], sha256=L.sha(texto), auditoria=f'auditor.py {VERSION}: verificada', cargado=hoy())
+                        filas=nf, sha256=L.sha(texto), auditoria=f'auditor.py {VERSION}: verificada', cargado=hoy())
             mp = os.path.join(d, cod + '.meta.json')
             json.dump(meta, open(mp, 'w', encoding='utf-8'), ensure_ascii=False)
             n = L.cargar_reporte(db, cod, p, mp)
             db.run([('INSERT OR REPLACE INTO entrada_publicacion VALUES (?,?,?,?,?)', [e['id'], cod, n, ahora(), hacelo[:300]])])
         db.run([("UPDATE entrada SET estado='reemplazada' WHERE codigo=? AND estado='publicada' AND id<>?", [e['codigo'], e['id']]),
                 ("UPDATE entrada SET estado='publicada' WHERE id=?", [e['id']])])
-        print(f"PUBLICADA {e['id']} {e['nombre']} → {', '.join(c for c, _ in destinos)} ({e['filas']} filas, corte {e['corte']})")
+        print(f"PUBLICADA {e['id']} {e['nombre']} → " + ', '.join(f'{c} ({nf} filas)' for c, _, nf in destinos) + f", corte {e['corte']}")
     return 0
 
 
-def renombrar(texto, columnas):
-    """Pasa los encabezados al formato del registro (mismas columnas, otro nombre). Falla si alguna columna no tiene par."""
+def renombrar(texto, columnas, empresa=None):
+    """Pasa los encabezados al formato del registro (mismas columnas, otro nombre). Falla si alguna columna no tiene par.
+    Con `empresa` deja solo los renglones cuya columna Empresa empieza así. Devuelve (texto, filas)."""
     h, filas, sep = tabla(texto)
     por = {nombre_col(c): c for c in columnas}
     nuevo = []
@@ -294,11 +297,16 @@ def renombrar(texto, columnas):
         if nombre_col(c) not in por:
             raise SystemExit(f'FALLA · la columna «{c}» no tiene par en el formato de destino')
         nuevo.append(por[nombre_col(c)])
+    if empresa:
+        ix = {nombre_col(c): k for k, c in enumerate(h)}
+        if 'empresa' not in ix:
+            raise SystemExit('FALLA · el reporte no tiene la columna Empresa: no se puede separar Horizon')
+        filas = [f for f in filas if f[ix['empresa']].strip().upper().startswith(empresa)]
     s = io.StringIO()
     w = csv.writer(s, delimiter=';', lineterminator='\n')
     w.writerow(nuevo)
     w.writerows(filas)
-    return s.getvalue()
+    return s.getvalue(), len(filas)
 
 
 # ------------------------------------------------------------------ entrar y estado
@@ -372,7 +380,9 @@ def autotest():
     ren = [[str(t), f'2026-11-{t:02d}', FA, f'A-00005-0000{1000 + t}', 'Cliente X', '30-11111111-1', '', '', 'Ont A', '10',
             'FH', 'FTTH', 'ONU', 'Dólares', H] for t in range(1, 11)]
     cab = [[str(t), f'2026-11-{t:02d}', FA, f'A-00005-0000{1000 + t}', 'Cliente X', '100', '', H] for t in range(1, 11)]
-    completo = esc('ren_completo.csv', RC, ren)
+    otra = ['99', '2026-11-05', FA, 'A-00001-00009999', 'Cliente Y', '30-22222222-2', '', '', 'Ont B', '3', 'FH', 'FTTH', 'ONU',
+            'Dólares', 'OTRA EMPRESA S.A.']
+    completo = esc('ren_completo.csv', RC, ren + [otra])          # 10 de Horizon + 1 de otra empresa
     cabecera = esc('cabecera.csv', CB, cab)
     recortado = esc('ren_recortado.csv', RC, ren[:3] + ren[6:])     # faltan 3 de 10 antes del corte (el caso del 23/11)
     raro = esc('otra_cosa.csv', ['a', 'b', 'c'], [['1', '2', '3']])
@@ -408,6 +418,9 @@ def autotest():
     v = L.q(db, 'SELECT COUNT(*) n FROM ventas')[0]['n']
     casos.append(('verificada + hacelo → publicada (ventas en formato R10)', rc3 == 0 and v == 10 and
                   L.q(db, "SELECT estado FROM entrada WHERE nombre='ren_completo.csv'")[0]['estado'] == 'publicada'))
+    cg = {r['fuente']: r['filas'] for r in L.q(db, 'SELECT fuente, filas FROM cargas')}
+    casos.append(('ventas solo con Horizon; R7 completo (otra empresa afuera de ventas)',
+                  cg.get('R7') == 11 and cg.get('R10') == 10 and not L.q(db, "SELECT 1 FROM ventas WHERE empresa NOT LIKE 'HORIZON%'")))
     casos.append(('el hacelo queda registrado', bool(L.q(db, "SELECT 1 FROM entrada_publicacion WHERE hacelo LIKE 'Nicolás%'"))))
     casos.append(('la cuarentena se ve en estado', estado(db, imprimir=False)[1] == 2))
     casos.append(('columnas iguales con otro nombre (Nrodeidentificacion = Nro de identificación)',

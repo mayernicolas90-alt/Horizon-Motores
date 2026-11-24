@@ -25,11 +25,16 @@ Uso (python3 -I):
 """
 import datetime as D, hashlib, importlib.util, json, os, subprocess, sys
 
-VERSION = 'dc 0.6 · 2026-11-24'
+VERSION = 'dc 0.7 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 MOTORES = ['importar.py', 'recompra.py', 'cuentas.py', 'puntaje.py', 'portada.py']   # en orden: un motor solo lee lo que dejaron los anteriores
 AUDITOR = 'auditor_dc.py'
 PROPIAS = ('dc_motores', 'dc_corridas')
+# 0.7: tablas que escriben OTROS procesos de Loki mientras corre un motor (la puerta de entrada de reportes, la copia del CRM al abrir,
+# la bitácora): no cuentan para el control de contrato. Caso 24/11 03:33: la puerta de entrada publicó R10/R23/R7 durante la corrida
+# de Limpieza y el control lo tomó como escritura fuera de contrato (falso positivo; el auditor frenó la publicación, como corresponde).
+OTROS_PROCESOS = ('archivos', 'cargas', 'reportes', 'entrada', 'crm', 'ventas', 'stock', 'recompra', 'clientes', 'cuentas', 'status_',
+                  'bitacora', 'tema', 'continuidad', 'cerebro', 'k_', 'aprendizajes', 'scripts', 'fichas', 'esquema', 'a_control')
 DDL = ["CREATE TABLE IF NOT EXISTS dc_motores(id TEXT PRIMARY KEY, nombre TEXT, version TEXT, disparo TEXT, lee TEXT, escribe TEXT, "
        "archivo TEXT, que_hace TEXT, actualizado TEXT)",
        "CREATE TABLE IF NOT EXISTS dc_corridas(id INTEGER PRIMARY KEY AUTOINCREMENT, motor TEXT, disparo TEXT, inicio TEXT, fin TEXT, "
@@ -109,11 +114,14 @@ def correr(disparo, forzar=False, solo=None, loki_ruta=None):
     db = L.conectar()
     cs = [contrato(a) for a in MOTORES]
     registrar(db, cs)
-    salida = []
+    salida, cortado = [], None
     for c in cs:
         if solo and c['id'] != solo:
             continue
         if disparo != 'todos' and c['disparo'] != disparo and not solo:
+            continue
+        if cortado:   # 0.7: si un motor falló, los siguientes no corren sobre datos sin aprobar
+            salida.append((c['id'], 'BLOQUEADO', f'no corre: {cortado} falló en esta corrida'))
             continue
         h = huella(db, c['lee'], c['version'])   # 0.2: una versión nueva del motor también lo vuelve a correr
         ult = q(db, "SELECT huella_entrada FROM dc_corridas WHERE motor=? AND estado='OK' AND auditor IN ('PASA','AVISO') ORDER BY id DESC LIMIT 1", [c['id']])
@@ -128,7 +136,8 @@ def correr(disparo, forzar=False, solo=None, loki_ruta=None):
                            capture_output=True, text=True, cwd=AQUI)
         res = next((l[8:] for l in reversed(r.stdout.splitlines()) if l.startswith('RESUMEN ')), '')
         despues = conteos(db, excluir=PROPIAS + tuple(c['escribe']))
-        fuera = sorted(t for t in set(antes) | set(despues) if t not in ('aud_resultados',) and antes.get(t) != despues.get(t))
+        fuera = sorted(t for t in set(antes) | set(despues) if t not in ('aud_resultados',) and not t.startswith(OTROS_PROCESOS)
+                       and antes.get(t) != despues.get(t))
         est = 'OK' if r.returncode == 0 else 'ERROR'
         db.run([('UPDATE dc_corridas SET fin=?, estado=?, resumen=?, fuera_contrato=? WHERE id=?',
                  [ahora(), est, res or (r.stderr or r.stdout)[-500:], json.dumps(fuera), cid])])
@@ -136,12 +145,14 @@ def correr(disparo, forzar=False, solo=None, loki_ruta=None):
                            capture_output=True, text=True, cwd=AQUI)
         veredicto = next((l.split()[1] for l in reversed(a.stdout.splitlines()) if l.startswith('AUDITOR ')), 'ERROR')
         db.run([('UPDATE dc_corridas SET auditor=? WHERE id=?', [veredicto, cid])])
+        if est != 'OK' or fuera or veredicto not in ('PASA', 'AVISO'):
+            cortado = c['id']
         salida.append((c['id'], est + (' · FUERA DE CONTRATO: ' + ', '.join(fuera) if fuera else ''), 'auditor ' + veredicto + ' · ' + a.stdout.strip().splitlines()[-1][:160] if a.stdout.strip() else 'auditor sin salida'))
     db.close()
     print(f'{VERSION} · disparo {disparo}')
     for m, e, d in salida:
         print(f'  {m:10} {e:12} {d}')
-    malas = [s for s in salida if s[1].startswith('ERROR') or 'FUERA' in s[1] or 'FALLA' in s[2]]
+    malas = [s for s in salida if s[1].startswith('ERROR') or 'FUERA' in s[1] or 'FALLA' in s[2] or s[1] == 'BLOQUEADO']
     print('RESULTADO: ' + ('FALLA' if malas else 'PASA'))
     return 1 if malas else 0
 
@@ -193,6 +204,10 @@ def autotest():
     c = sqlite3.connect(base); c.execute("UPDATE archivos SET sha256='h2'"); c.commit(); c.close()
     r4 = dc('correr', '--disparo', 'finnegans')
     r5 = dc('correr', '--disparo', 'finnegans', motores=('m_malo.py',))
+    open(os.path.join(d, 'm_otro.py'), 'w').write(bueno % ('otro', 'sal_otro', 'sal_otro', 'sal_otro', ''))
+    c0 = sqlite3.connect(base); c0.execute("UPDATE archivos SET sha256='h3'"); c0.commit(); c0.close()
+    c0 = sqlite3.connect(base); corr5 = c0.execute('SELECT fuera_contrato FROM dc_corridas ORDER BY id DESC LIMIT 1').fetchone()[0]; c0.close()
+    r6 = dc('correr', '--disparo', 'finnegans', motores=('m_malo.py', 'm_otro.py'))
     c = sqlite3.connect(base)
     corr = c.execute('SELECT motor, estado, auditor, fuera_contrato FROM dc_corridas ORDER BY id').fetchall()
     casos = [
@@ -200,7 +215,8 @@ def autotest():
         ('sin cambios en la entrada no vuelve a correr', 'SIN CAMBIOS' in r2.stdout and len([x for x in corr if x[0] == 'bueno']) == 2),
         ('otro disparo no corre motores de Finnegans', 'bueno' not in r3.stdout),
         ('si cambia el archivo crudo vuelve a correr', 'SIN CAMBIOS' not in r4.stdout and r4.returncode == 0),
-        ('escribir fuera del contrato queda marcado y da FALLA', 'FUERA DE CONTRATO: ajena' in r5.stdout and r5.returncode == 1 and corr[-1][3] == '["ajena"]'),
+        ('escribir fuera del contrato queda marcado y da FALLA', 'FUERA DE CONTRATO: ajena' in r5.stdout and r5.returncode == 1 and corr5 == '["ajena"]'),
+        ('si un motor falla, el siguiente no corre (BLOQUEADO)', 'BLOQUEADO' in r6.stdout and 'no corre: malo' in r6.stdout),
         ('el contrato queda registrado', c.execute("SELECT count(*) FROM dc_motores WHERE id IN ('bueno','malo')").fetchone()[0] == 2),
     ]
     c.close()

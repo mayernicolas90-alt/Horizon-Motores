@@ -76,8 +76,8 @@
   },
   "dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "01f711f42251",
-   "version": "0.6",
+   "huella": "101166408b46",
+   "version": "0.7",
    "test": [
     "--autotest"
    ]
@@ -123,9 +123,9 @@
    ]
   },
   "auditor.py": {
-   "origen": "nuevo 23/11 (Fase 1 del plan «auditor de entrada», PR #12): recibir, clasificar, verificar y publicar los reportes de Finnegans",
-   "huella": "d2b8f4eff626",
-   "version": "0.1",
+   "origen": "nuevo 23/11 (Fase 1 del plan «auditor de entrada»): recibir, clasificar, verificar y publicar los reportes de Finnegans; probado en copia local: Reporte (27) a cuarentena, Reportedsd verificado y publicado (1457 filas); 0.2 (24/11): ventas (R10) solo con los renglones de Horizon (1.219 de 1.457 al 20/11), R7 completo",
+   "huella": "e13c47d54f4f",
+   "version": "0.2",
    "test": [
     "--autotest"
    ]
