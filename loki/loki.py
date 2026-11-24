@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Loki · motor de apertura, control de datos, bitacora y verificacion de cierre (Horizon). v3.1
+"""Loki · motor de apertura, control de datos, bitacora y verificacion de cierre (Horizon). v3.2
 
+v3.2 (24/11): una cotización queda fuera si SU FICHA está archivada, en no prospectar o es de otro vendedor
+  (campos archivada / noProspectar / otroVendedor del CRM). Antes solo se miraba la cotización y la lista fija
+  FUERA/OTRO, y por eso Iplus (ficha archivada, DEC-1124d) salió primera en el top 5 del 24/11. La lista fija
+  queda como respaldo. Nuevo: loki.py --autotest.
 v3.1 (21/11): urgentes = solo venta (cierre, cotización, lead). Las entregas abiertas salen aparte en "posventa"
   (pestaña Posventa) y ya no ocupan lugares del top 5 ni de cortas (regla N01).
 
@@ -62,6 +66,21 @@ def excluida(nombre):
     return bool(re.search(FUERA, n) or re.search(OTRO, n))
 
 
+def si(v):
+    """Marca del CRM puesta: True, 'si', 1 (no cuenta None, '', 'no', False)."""
+    return v is True or (isinstance(v, (int, float)) and not isinstance(v, bool) and v != 0) or norm(v) in ('si', 'true', 'x')
+
+
+def ficha_fuera(o):
+    """3.2: la ficha no se trabaja (archivada, no prospectar u otro vendedor)."""
+    return bool(o) and (si(o.get('archivada')) or si(o.get('noProspectar')) or si(o.get('otroVendedor')))
+
+
+def cot_fuera(c, por_id):
+    """3.2: cotización fuera por ella misma, por su ficha o por la lista fija."""
+    return si(c.get('archivada')) or excluida(c.get('cliente')) or ficha_fuera(por_id.get(c.get('oportunidadId')))
+
+
 def lista(col):
     if isinstance(col, dict):
         return [dict(v, id=v.get('id', k)) if isinstance(v, dict) else v for k, v in col.items()]
@@ -81,9 +100,10 @@ def cargar(d):
 def seguimientos(cots, ops, hoy):
     lim = habiles(hoy, 2)
     espera = {o.get('id') for o in ops if o.get('enEspera') == 'si' and (fecha(o.get('proximaFecha')) or hoy) > hoy}
+    por_id = {o.get('id'): o for o in ops}
     res = []
     for c in cots:
-        if c.get('estado') not in ABIERTAS or c.get('archivada') or excluida(c.get('cliente')):
+        if c.get('estado') not in ABIERTAS or cot_fuera(c, por_id):
             continue
         if c.get('oportunidadId') in espera:
             continue
@@ -110,14 +130,15 @@ def clave_comp(s):
     return re.sub(r'\D', '', str(s or ''))
 
 
-def posventa(cots, filas):
+def posventa(cots, filas, ops=()):
     pte = defaultdict(float)
     for r in filas:
         pte[clave_comp(r.get('Comprobante'))] += num(r.get('Pte Dest.'))
+    por_id = {o.get('id'): o for o in ops}
     res = []
     for c in cots:
         op = c.get('hz_operacion') or {}
-        if c.get('estado') != 'aceptada' or c.get('archivada') or excluida(c.get('cliente')):
+        if c.get('estado') != 'aceptada' or cot_fuera(c, por_id):
             continue
         if op.get('despacho') == 'pendiente' or op.get('entrega') in ('pendiente', 'parcial'):
             fa = clave_comp(op.get('factura'))
@@ -193,7 +214,7 @@ def abrir(d, hoy):
     a, filas = cargar(d)
     col = a['respaldo'].get('collections', {})
     ops, cots = lista(col.get('oportunidades')), lista(col.get('cotizaciones'))
-    seg, pos = seguimientos(cots, ops, hoy), posventa(cots, filas)
+    seg, pos = seguimientos(cots, ops, hoy), posventa(cots, filas, ops)
     letoca, atras, det = recompra(a['recompra'])
     salida = dict(hoy=hoy.isoformat(),
                   fuentes=dict(respaldo=dm(a['respaldo_meta'].get('exportadoEn')), finnegans=dm(a['r10_meta'].get('corte')), recompra=dm(a['recompra_meta'].get('actualizado'))),
@@ -260,7 +281,7 @@ def urgentes(d, hoy):
     st = stock_de(d)
     top, cortas, conflictos, pos = [], [], [], []
     for c in cots:
-        if c.get('archivada') or excluida(c.get('cliente')):
+        if cot_fuera(c, por_id):
             continue
         o = por_id.get(c.get('oportunidadId')) or {}
         if o.get('noProspectar') or (o.get('enEspera') == 'si' and (fecha(o.get('proximaFecha')) or hoy) > hoy):
@@ -294,7 +315,7 @@ def urgentes(d, hoy):
                 pos.append(dict(base, tipo='posventa', por_que=('pagó y no recibió' if pago else 'entrega abierta') + (f', fecha vencida hace {dias(prox, hoy)} días' if prox and prox < hoy else ''), accion=acc[:90]))
     con_cot = {c.get('oportunidadId') for c in cots if not c.get('archivada') and c.get('estado') in ABIERTAS}
     for o in ops:
-        if o.get('archivada') or o.get('noProspectar') or excluida(o.get('empresa')) or o.get('id') in con_cot or o.get('etapa') == 'perdido':
+        if ficha_fuera(o) or excluida(o.get('empresa')) or o.get('id') in con_cot or o.get('etapa') == 'perdido':
             continue
         acc = o.get('proximaAccion') or ''
         if re.search(r'(?i)responderle|me interesa', acc):
@@ -305,14 +326,45 @@ def urgentes(d, hoy):
     leads = sorted((x for x in top if x['b'] == 4), key=lambda x: -x['dias_sin_contacto'])
     if leads and leads[0] not in top[:5] and len(top) >= 5:
         top.remove(leads[0]); top.insert(4, leads[0])  # un lugar reservado: responder un lead cuesta poco
-    vencidas = [o for o in ops if not o.get('archivada') and not o.get('noProspectar') and not excluida(o.get('empresa')) and o.get('etapa') != 'perdido' and (fecha(o.get('proximaFecha')) or hoy) < hoy]
+    vencidas = [o for o in ops if not ficha_fuera(o) and not excluida(o.get('empresa')) and o.get('etapa') != 'perdido' and (fecha(o.get('proximaFecha')) or hoy) < hoy]
     muestras = [m for m in lista(col.get('muestras')) if m.get('estado') in ('pedida', 'enviada', 'prueba')]
     print(json.dumps(dict(hoy=hoy.isoformat(), top5=top[:5], siguen=top[5:], cortas=sorted(cortas, key=lambda x: -x['usd']), conflictos=conflictos,
                      posventa=sorted(pos, key=lambda x: (x['por_que'][:4] != 'pagó', -x['usd'])), fichas_con_accion_vencida=len(vencidas), muestras_abiertas=len(muestras)), ensure_ascii=False, separators=(',', ':')))
 
 
+def autotest():
+    """3.2: casos del 24/11 (Iplus) y que lo de siempre no cambie."""
+    hoy = D.date(2026, 11, 24)
+    ops = [dict(id='f1', empresa='Iplus S.A.S', archivada=True), dict(id='f2', empresa='Internet Plus', otroVendedor=True),
+           dict(id='f3', empresa='Net Acebal', ultimoContacto='2026-11-16'), dict(id='f4', empresa='Coop X', noProspectar='si'),
+           dict(id='f5', empresa='Sion SA'), dict(id='f6', empresa='Pampacom', otroVendedor='no')]
+    cot = lambda i, n, cli, f, **k: dict(dict(id=i, numero=n, cliente=cli, oportunidadId=f, estado='enviada', total=9000,
+                                         fecha='2026-11-16', revisionFecha='2026-11-20', vence='2026-11-01'), **k)
+    cots = [cot('c1', 'NM43', 'Iplus S.A.S', 'f2'), cot('c2', 'NM54', 'Net Acebal', 'f3'), cot('c3', 'NM9', 'Coop X', 'f4'),
+            cot('c4', 'NM8', 'Sion SA', 'f5'), cot('c5', 'NM47', 'Pampacom', 'f6'), cot('c6', 'NM1', 'Net Acebal', 'f3', archivada=True)]
+    por_id = {o['id']: o for o in ops}
+    casos = [
+        ('cotización de ficha otro vendedor fuera (Iplus)', cot_fuera(cots[0], por_id)),
+        ('ficha archivada fuera', ficha_fuera(ops[0])),
+        ('ficha normal adentro', not cot_fuera(cots[1], por_id)),
+        ('no prospectar "si" fuera', cot_fuera(cots[2], por_id)),
+        ('lista fija sigue andando (Sion)', cot_fuera(cots[3], por_id)),
+        ('otroVendedor "no" no excluye', not cot_fuera(cots[4], por_id)),
+        ('cotización archivada fuera', cot_fuera(cots[5], por_id)),
+        ('seguimientos sin Iplus', [x['n'] for x in seguimientos(cots, ops, hoy)] == ['NM54', 'NM47']),
+        ('cotización sin ficha no rompe', not cot_fuera(cot('c7', 'NM2', 'Nueva', 'zz'), por_id)),
+    ]
+    mal = [n for n, ok in casos if not ok]
+    for n, ok in casos:
+        print(('PASA ' if ok else 'FALLA') + ' · ' + n)
+    print(f'autotest loki.py: {len(casos) - len(mal)}/{len(casos)} ' + ('PASA' if not mal else 'FALLA'))
+    sys.exit(1 if mal else 0)
+
+
 if __name__ == '__main__':
     arg = sys.argv[1:]
+    if arg[:1] == ['--autotest']:
+        autotest()
     if len(arg) >= 2 and arg[0] == 'abrir':
         abrir(arg[1], fecha(arg[2]) if len(arg) > 2 else D.date.today())
     elif len(arg) >= 2 and arg[0] == 'urgentes':
