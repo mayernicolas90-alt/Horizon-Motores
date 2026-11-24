@@ -76,16 +76,24 @@
   },
   "dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "4e79f2747bf1",
-   "version": "0.2",
+   "huella": "7091617e6e23",
+   "version": "0.3",
    "test": [
     "--autotest"
    ]
   },
   "auditor.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/c)",
-   "huella": "1badb6940237",
-   "version": "0.2",
+   "huella": "114ef09e91c9",
+   "version": "0.3",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "cuentas.py": {
+   "origen": "nuevo 24/11 (motor Cuentas del datacenter, regla D07)",
+   "huella": "8299599abe3e",
+   "version": "0.1",
    "test": [
     "--autotest"
    ]

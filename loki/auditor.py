@@ -16,9 +16,9 @@ Controles de Limpieza:
 
 Uso (python3 -I): auditor.py correr --corrida N [--loki ruta] · auditor.py --contrato · auditor.py --autotest
 """
-import csv, datetime as D, importlib.util, io, json, os, sys
+import csv, datetime as D, importlib.util, io, json, os, re, sys
 
-VERSION = 'auditor 0.2 · 2026-11-24'
+VERSION = 'auditor 0.3 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 EMPRESA = 'HORIZON TRADING S.A.'
 CONTRATO = {'id': 'auditor', 'nombre': 'Auditor', 'disparo': 'cada corrida', 'lee': ['*'], 'escribe': ['aud_resultados'],
@@ -114,7 +114,27 @@ def controles_recompra(db, R):
     R('R6', 'el resumen por cliente muestra su SKU más urgente', 'PASA' if not inc else 'FALLA', f'{inc} clientes con resumen distinto')
 
 
-CONTROLES = {'limpieza': controles_limpieza, 'recompra': controles_recompra}
+def controles_cuentas(db, R):
+    n, d = uno(db, 'SELECT count(*) FROM cue_cuentas'), uno(db, 'SELECT count(DISTINCT clave) FROM cue_cuentas')
+    R('C1', 'una fila por cuenta', 'PASA' if n == d and n else 'FALLA', f'{n} filas · {d} claves')
+    # la regla D07 se sigue pudiendo leer: leída con código propio, sin usar el motor
+    t = (q(db, "SELECT texto FROM k_regla WHERE id='D07'") or [{'texto': ''}])[0]['texto'] or ''
+    def lista(k):
+        m = re.search(k + r'\s*\(([^)]*)\)', t, re.I)
+        return [p for p in re.split(r'[,/;]', m.group(1)) if p.strip()] if m else []
+    np_, ov = lista('no prospectar'), lista('otro vendedor')
+    R('C2', 'la regla D07 se puede leer', 'PASA' if len(np_) >= 5 and len(ov) >= 2 else 'FALLA', f'{len(np_)} no prospectar · {len(ov)} otro vendedor')
+    excl = uno(db, "SELECT count(*) FROM cue_cuentas WHERE estado IN ('no_prospectar','otro_vendedor')")
+    R('C3', 'hay cuentas excluidas por la regla', 'PASA' if excl >= len(np_) // 2 else 'AVISO', f'{excl} cuentas excluidas para {len(np_) + len(ov)} nombres en la regla')
+    con = q(db, 'SELECT empresa, conflicto FROM cue_cuentas WHERE conflicto IS NOT NULL')
+    R('C4', 'conflictos entre fuentes para definir', 'AVISO' if con else 'PASA', '; '.join(f"{c['empresa']}: {c['conflicto'][:80]}" for c in con) or 'ninguno')
+    falta = uno(db, "SELECT count(DISTINCT cuit) FROM limpia_comprobantes WHERE cuit <> '' AND cuit NOT IN (SELECT coalesce(cuit,'') FROM cue_cuentas)")
+    R('C5', 'todo CUIT que compró tiene su cuenta', 'PASA' if not falta else 'FALLA', f'{falta} CUIT sin cuenta')
+    mal = uno(db, "SELECT count(*) FROM cue_cuentas WHERE (estado = 'trabajar') <> (trabajar = 1)")
+    R('C6', 'trabajar coincide con el estado', 'PASA' if not mal else 'FALLA', f'{mal} filas incoherentes')
+
+
+CONTROLES = {'limpieza': controles_limpieza, 'recompra': controles_recompra, 'cuentas': controles_cuentas}
 
 
 def correr(corrida, loki_ruta=None):

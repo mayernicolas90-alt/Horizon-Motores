@@ -25,9 +25,9 @@ Uso (python3 -I):
 """
 import datetime as D, hashlib, importlib.util, json, os, subprocess, sys
 
-VERSION = 'dc 0.2 · 2026-11-24'
+VERSION = 'dc 0.3 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
-MOTORES = ['importar.py', 'recompra.py']   # en orden: un motor solo lee lo que dejaron los anteriores
+MOTORES = ['importar.py', 'recompra.py', 'cuentas.py']   # en orden: un motor solo lee lo que dejaron los anteriores
 AUDITOR = 'auditor.py'
 PROPIAS = ('dc_motores', 'dc_corridas')
 DDL = ["CREATE TABLE IF NOT EXISTS dc_motores(id TEXT PRIMARY KEY, nombre TEXT, version TEXT, disparo TEXT, lee TEXT, escribe TEXT, "
@@ -180,7 +180,7 @@ def autotest():
     shutil.copy(os.path.abspath(__file__), os.path.join(d, 'dc.py'))
     env = dict(os.environ, LOKI_SQL_LOCAL=base)
     def dc(*a, motores=('m_bueno.py',)):
-        src = open(os.path.join(d, 'dc.py')).read().replace("MOTORES = ['importar.py', 'recompra.py']", 'MOTORES = ' + repr(list(motores)), 1)
+        src = open(os.path.join(d, 'dc.py')).read().replace("MOTORES = ['importar.py', 'recompra.py', 'cuentas.py']", 'MOTORES = ' + repr(list(motores)), 1)
         open(os.path.join(d, 'dc_t.py'), 'w').write(src)
         return subprocess.run([sys.executable, '-X', 'utf8', os.path.join(d, 'dc_t.py'), *a], capture_output=True, text=True, env=env, cwd=d)
     r1 = dc('correr', '--disparo', 'finnegans')
