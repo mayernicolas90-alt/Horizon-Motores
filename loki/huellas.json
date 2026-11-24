@@ -81,6 +81,20 @@
    "test": [
     "--autotest"
    ]
+  },
+  "pm_lectura.py": {
+   "origen": "%USERPROFILE%/.loki/pm_lectura.py",
+   "huella": "de4eeb202fbc",
+   "version": "0.1",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "guardar_token_pm.py": {
+   "origen": "%USERPROFILE%/.loki/guardar_token_pm.py",
+   "huella": "485906f64fa4",
+   "version": "0.1",
+   "test": []
   }
  }
 }
