@@ -1,0 +1,470 @@
+{
+ "olt_an6000-7/portada": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FIBERHOME · OLT (20px) · ONU POR CHASIS (16px) · Ventilador incluido (21px) · Fuente redundante (21px)"
+  ],
+  "panal": true,
+  "mira": "der",
+  "modo": "centrado",
+  "foto": [
+   280,
+   520,
+   526,
+   328
+  ],
+  "escala": {
+   "modo": "fisica",
+   "lado_mayor_mm": 480,
+   "area_objetivo": 0.5
+  },
+  "calidad": {
+   "ampliacion": 0.56,
+   "px_origen": [
+    937,
+    584
+   ],
+   "nitidez": 8.27
+  },
+  "sombra": {
+   "apoyado": true,
+   "opacidad": 0.42,
+   "ancho": 462,
+   "alto": 23
+  },
+  "luz": "oscuro",
+  "mirada": {
+   "cambio_altura": -0.15,
+   "r2": 0.75,
+   "bordes_convergen": true,
+   "fuente": "lineas"
+  },
+  "par": null
+ },
+ "olt_an6000-7/detalle": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true,
+   "par_portada_ficha": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FICHA DEL EQUIPO (20px) · ONU por chasis (15px) · Backplane (15px) · Switch core redundante (15px)"
+  ],
+  "panal": true,
+  "mira": "der",
+  "modo": "centrado",
+  "foto": [
+   184,
+   408,
+   303,
+   189
+  ],
+  "escala": {
+   "modo": "fisica",
+   "lado_mayor_mm": 480,
+   "area_objetivo": 0.5
+  },
+  "calidad": {
+   "ampliacion": 0.32,
+   "px_origen": [
+    937,
+    584
+   ],
+   "nitidez": 8.27
+  },
+  "sombra": {
+   "apoyado": true,
+   "opacidad": 0.42,
+   "ancho": 266,
+   "alto": 13
+  },
+  "luz": "oscuro",
+  "mirada": {
+   "cambio_altura": -0.15,
+   "r2": 0.75,
+   "bordes_convergen": true,
+   "fuente": "lineas"
+  },
+  "par": {
+   "misma_mirada": true,
+   "misma_escala": true,
+   "mismo_color": true
+  }
+ },
+ "ont_hg6145f3/portada": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FIBERHOME · OLT (20px) · ONU POR CHASIS (16px) · Ventilador incluido (21px) · Fuente redundante (21px)"
+  ],
+  "panal": true,
+  "mira": "der",
+  "modo": "centrado",
+  "foto": [
+   400,
+   520,
+   279,
+   328
+  ],
+  "escala": {
+   "modo": "fisica",
+   "lado_mayor_mm": 185,
+   "area_objetivo": 0.245
+  },
+  "calidad": {
+   "ampliacion": 0.47,
+   "px_origen": [
+    592,
+    697
+   ],
+   "nitidez": 29.74
+  },
+  "sombra": {
+   "apoyado": true,
+   "opacidad": 0.42,
+   "ancho": 245,
+   "alto": 23
+  },
+  "luz": "claro",
+  "mirada": {
+   "cambio_altura": 0.236,
+   "r2": 0.02,
+   "bordes_convergen": true,
+   "fuente": "franjas"
+  },
+  "par": null
+ },
+ "ont_hg6145f3/detalle": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true,
+   "par_portada_ficha": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FICHA DEL EQUIPO (20px) · ONU por chasis (15px) · Backplane (15px) · Switch core redundante (15px)"
+  ],
+  "panal": false,
+  "mira": "der",
+  "modo": "centrado",
+  "foto": [
+   248,
+   408,
+   161,
+   189
+  ],
+  "escala": {
+   "modo": "fisica",
+   "lado_mayor_mm": 185,
+   "area_objetivo": 0.245
+  },
+  "calidad": {
+   "ampliacion": 0.27,
+   "px_origen": [
+    592,
+    697
+   ],
+   "nitidez": 29.74
+  },
+  "sombra": {
+   "apoyado": true,
+   "opacidad": 0.42,
+   "ancho": 141,
+   "alto": 13
+  },
+  "luz": "claro",
+  "mirada": {
+   "cambio_altura": 0.236,
+   "r2": 0.02,
+   "bordes_convergen": true,
+   "fuente": "franjas"
+  },
+  "par": {
+   "misma_mirada": true,
+   "misma_escala": true,
+   "mismo_color": true
+  }
+ },
+ "ont_hg6543d_foto_chica/portada": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FIBERHOME · OLT (20px) · ONU POR CHASIS (16px) · Ventilador incluido (21px) · Fuente redundante (21px)"
+  ],
+  "panal": true,
+  "mira": "der",
+  "modo": "centrado",
+  "foto": [
+   408,
+   520,
+   273,
+   328
+  ],
+  "escala": {
+   "modo": "fisica",
+   "lado_mayor_mm": 185,
+   "area_objetivo": 0.245
+  },
+  "calidad": {
+   "ampliacion": 1.2,
+   "px_origen": [
+    228,
+    274
+   ],
+   "nitidez": 425.87
+  },
+  "sombra": {
+   "apoyado": true,
+   "opacidad": 0.42,
+   "ancho": 235,
+   "alto": 23
+  },
+  "luz": "claro",
+  "mirada": {
+   "cambio_altura": 0.404,
+   "r2": 0.04,
+   "bordes_convergen": true,
+   "fuente": "franjas"
+  },
+  "par": null
+ },
+ "ont_hg6543d_foto_chica/detalle": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true,
+   "par_portada_ficha": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FICHA DEL EQUIPO (20px) · ONU por chasis (15px) · Backplane (15px) · Switch core redundante (15px)"
+  ],
+  "panal": false,
+  "mira": "der",
+  "modo": "centrado",
+  "foto": [
+   248,
+   408,
+   157,
+   189
+  ],
+  "escala": {
+   "modo": "fisica",
+   "lado_mayor_mm": 185,
+   "area_objetivo": 0.245
+  },
+  "calidad": {
+   "ampliacion": 0.69,
+   "px_origen": [
+    228,
+    274
+   ],
+   "nitidez": 425.87
+  },
+  "sombra": {
+   "apoyado": true,
+   "opacidad": 0.42,
+   "ancho": 135,
+   "alto": 13
+  },
+  "luz": "claro",
+  "mirada": {
+   "cambio_altura": 0.404,
+   "r2": 0.04,
+   "bordes_convergen": true,
+   "fuente": "franjas"
+  },
+  "par": {
+   "misma_mirada": true,
+   "misma_escala": true,
+   "mismo_color": true
+  }
+ },
+ "switch_s5735l_sin_medidas/portada": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FIBERHOME · OLT (20px) · ONU POR CHASIS (16px) · Ventilador incluido (21px) · Fuente redundante (21px)"
+  ],
+  "panal": true,
+  "mira": "centro",
+  "modo": "centrado",
+  "foto": [
+   112,
+   592,
+   857,
+   158
+  ],
+  "escala": {
+   "modo": "familia",
+   "familia": "olt",
+   "area_objetivo": 0.5
+  },
+  "calidad": {
+   "ampliacion": 0.64,
+   "px_origen": [
+    1347,
+    249
+   ],
+   "nitidez": 18.53
+  },
+  "sombra": {
+   "apoyado": false,
+   "opacidad": 0.24,
+   "ancho": 754,
+   "alto": 11
+  },
+  "luz": "oscuro",
+  "mirada": {
+   "cambio_altura": -0.028,
+   "r2": 0.01,
+   "bordes_convergen": true,
+   "fuente": "lineas (frontal)"
+  },
+  "par": null
+ },
+ "switch_s5735l_sin_medidas/detalle": {
+  "aprobado": true,
+  "pruebas": {
+   "tercios": true,
+   "mirada": true,
+   "lineas_guia": true,
+   "espacio_negativo": true,
+   "profundidad": true,
+   "reflejo_tope": true,
+   "enmarcado": true,
+   "impares": true,
+   "escala": true,
+   "calidad_foto": true,
+   "sombra_apoyo": true,
+   "grilla_8px": true,
+   "par_portada_ficha": true
+  },
+  "avisos": [
+   "textos de plantilla < 22 px (no se tocan): FICHA DEL EQUIPO (20px) · ONU por chasis (15px) · Backplane (15px) · Switch core redundante (15px)"
+  ],
+  "panal": true,
+  "mira": "centro",
+  "modo": "centrado",
+  "foto": [
+   104,
+   456,
+   448,
+   83
+  ],
+  "escala": {
+   "modo": "familia",
+   "familia": "olt",
+   "area_objetivo": 0.5
+  },
+  "calidad": {
+   "ampliacion": 0.33,
+   "px_origen": [
+    1347,
+    249
+   ],
+   "nitidez": 18.53
+  },
+  "sombra": {
+   "apoyado": false,
+   "opacidad": 0.24,
+   "ancho": 394,
+   "alto": 10
+  },
+  "luz": "oscuro",
+  "mirada": {
+   "cambio_altura": -0.028,
+   "r2": 0.01,
+   "bordes_convergen": true,
+   "fuente": "lineas (frontal)"
+  },
+  "par": {
+   "misma_mirada": true,
+   "misma_escala": true,
+   "mismo_color": true
+  }
+ }
+}
