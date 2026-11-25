@@ -2,6 +2,9 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.14.0 (25/11, paso 1 de la auditoría del 25/11, hacelo de Nicolás): bajar/abrir bajan también cuentas.py y, si no está
+        junto a loki_sql.py (arranque en la nube), lo dejan ahí: armar-clientes y el control L8 ya no fallan por eso. La apertura
+        lee la recompra 4.1 (rec_sku, sin excluidas) en lugar de la tabla `recompra` 3.1; sin rec_sku queda la 3.1.
 1.13.0 (24/11, paso 4 del datacenter, hacelo de Nicolás): cargar-crm y abrir --crm exigen --origen (URL o id del CRM) y
         rechazan cualquier CRM que no sea 5SPm y un incremental de más de 150 fichas (salvo --forzar). La carga queda rotulada
         «CRM 5SPm» con el origen en meta (antes decía «CRM FLgX» siempre). L9 al abrir: FALLA si una copia del CRM vino de
@@ -108,7 +111,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.13.0"
+VERSION = "1.14.0"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -238,7 +241,10 @@ DDL = [
     " OR NULLIF(TRIM(COALESCE(o.domicilio,c.domicilio)),'') IS NULL) ORDER BY ganada DESC",
 ]
 BAJAR_ARCHIVOS = ('R10.csv', 'R8.csv', 'recompra.json')
-BAJAR_SCRIPTS = ('loki.py', 'memoria_check.py', 'motor.py', 'bitacora2.py')    # 1.8.0: motor.py (#65) · 1.9.1: bitacora2.py (chequear al abrir)
+BAJAR_SCRIPTS = ('loki.py', 'memoria_check.py', 'motor.py', 'bitacora2.py', 'cuentas.py')    # 1.8.0: motor.py (#65) · 1.9.1: bitacora2.py · 1.14.0: cuentas.py
+# 1.14.0: columnas de rec_sku (recompra 4.1) que se pasan a DATOS/recompra.json para loki.py
+REC41_COLS = ('cliente', 'sku', 'ultimo_modelo', 'linea', 'compras', 'primera', 'ultima', 'dias_desde_ultima', 'ciclo_dias',
+              'proxima', 'cant_prom', 'cant_ult', 'cant_total', 'estado')
 TABLA_DE = {'R10': 'ventas', 'R8': 'stock', 'recompra': 'recompra', 'cuentas': 'cuentas', 'aprendizajes': 'aprendizajes'}
 
 
@@ -735,6 +741,27 @@ def cargar_script(db, nombre, archivo, version):
 
 
 # ------------------------------------------------------------------ bajar
+def rec41(db, datos):
+    """1.14.0: la apertura lee la recompra 4.1 (rec_sku, motor del datacenter sobre compras limpias) en lugar de la tabla
+    `recompra` 3.1. Deja DATOS/recompra.json y recompra_meta.json con el mismo formato que esperaba loki.py. Sin rec_sku
+    (base vieja o autotest) queda la 3.1 como antes y devuelve False."""
+    try:
+        r_sku, r_cor, r_fue = qs(db, [
+            'SELECT %s FROM rec_sku WHERE COALESCE(excluida, 0) = 0' % ', '.join(REC41_COLS),
+            "SELECT fin, resumen FROM dc_corridas WHERE motor='recompra' AND estado='OK' ORDER BY id DESC LIMIT 1",
+            "SELECT corte FROM limpia_fuentes WHERE fuente='renglones'"])
+    except Exception:  # noqa: BLE001  base sin tablas del datacenter
+        return False
+    if not r_sku:
+        return False
+    json.dump([dict(s) for s in r_sku], open(os.path.join(datos, 'recompra.json'), 'w', encoding='utf-8'), ensure_ascii=False)
+    fin = r_cor[0]['fin'] if r_cor else None
+    meta = dict(version='recompra 4.1 (rec_sku)', filas=len(r_sku), corte=r_fue[0]['corte'] if r_fue else None,
+                actualizado=str(fin)[:10] if fin else None, origen='rec_sku · loki_sql 1.14.0')
+    json.dump(meta, open(os.path.join(datos, 'recompra_meta.json'), 'w', encoding='utf-8'), ensure_ascii=False)
+    return True
+
+
 def bajar(db, raiz):
     datos, scr = os.path.join(raiz, 'DATOS'), os.path.join(raiz, 'SCRIPTS')
     for p in (datos, scr):
@@ -755,6 +782,12 @@ def bajar(db, raiz):
         open(os.path.join(scr, s['nombre']), 'w', encoding='utf-8').write(s['texto'])
     if os.path.abspath(__file__) != os.path.abspath(os.path.join(scr, 'loki_sql.py')):
         shutil.copyfile(os.path.abspath(__file__), os.path.join(scr, 'loki_sql.py'))   # motor.py lo importa de su misma carpeta
+    # 1.14.0: armar-clientes busca cuentas.py junto a ESTE archivo; si no está (arranque en la nube), se deja la versión de la base
+    junto = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cuentas.py')
+    if not os.path.exists(junto) and os.path.exists(os.path.join(scr, 'cuentas.py')):
+        shutil.copyfile(os.path.join(scr, 'cuentas.py'), junto)
+    if 'cuentas.py' not in {s['nombre'] for s in r_scr}:
+        fallas.append('L2 falta cuentas.py en la tabla scripts (armar-clientes no corre)')
     for a in r_arc:
         if sha(a['texto']) != a['sha256']:
             fallas.append(f"L2 archivo {a['nombre']}: sha256 no coincide")
@@ -763,6 +796,7 @@ def bajar(db, raiz):
     for f, n in (('R10', 'R10_meta.json'), ('recompra', 'recompra_meta.json'), ('R8', 'R8_meta.json')):
         if f in cg:
             json.dump(json.loads(cg[f]['meta'] or '{}'), open(os.path.join(datos, n), 'w', encoding='utf-8'), ensure_ascii=False)
+    rec41(db, datos)
     colecciones, corte_crm = {}, None
     for r in r_crm:
         colecciones.setdefault(r['coleccion'], {})[r['id']] = json.loads(r['data'])
@@ -1687,6 +1721,9 @@ def autotest():
         fb, _cg = bajar(db, f'{base}/B')
         chk('bajar trae motor.py con sha256 verificado', not [x for x in fb if 'motor' in x] and os.path.exists(f'{base}/B/SCRIPTS/motor.py'))
         chk('bajar deja loki_sql.py al lado de motor.py', os.path.exists(f'{base}/B/SCRIPTS/loki_sql.py'))
+        chk('1.14.0 bajar trae cuentas.py o avisa L2', os.path.exists(f'{base}/B/SCRIPTS/cuentas.py') or any('cuentas.py' in x for x in fb))
+        chk('1.14.0 sin rec_sku la recompra queda la 3.1', rec41(db, f'{base}/B/DATOS') is False
+            or json.load(open(f'{base}/B/DATOS/recompra_meta.json', encoding='utf-8')).get('version', '').startswith('recompra 4.1'))
         db.close()
     finally:
         os.environ.pop('LOKI_SQL_LOCAL', None)
