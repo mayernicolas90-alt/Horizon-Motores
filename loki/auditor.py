@@ -284,6 +284,7 @@ def publicar(db, lote, hacelo):
         db.run([("UPDATE entrada SET estado='reemplazada' WHERE codigo=? AND estado='publicada' AND id<>?", [e['codigo'], e['id']]),
                 ("UPDATE entrada SET estado='publicada' WHERE id=?", [e['id']])])
         print(f"PUBLICADA {e['id']} {e['nombre']} → " + ', '.join(f'{c} ({nf} filas)' for c, _, nf in destinos) + f", corte {e['corte']}")
+    L.cadena('todos', 'auditor publicar ' + str(lote))   # loki_sql 1.15.0 · DEC-1124b
     return 0
 
 

@@ -2,6 +2,10 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.15.0 (25/11, paso 2 de la auditoría, hacelo de Nicolás · DEC-1124b): después de cargar-reporte y cargar-crm (y de abrir con
+        --crm) corre la cadena de motores con dc.py (Finnegans: todos; CRM: los del disparo loki) y muestra una línea CADENA con
+        PASA/FALLA. dc.py ya corta la cadena y el Publicador no publica si el auditor da FALLA. --sin-cadena la saltea; sin dc.py
+        avisa y no frena la carga. En la PC los motores corren a través de conauth.py (LOKI_CONAUTH) para tener el token.
 1.14.0 (25/11, paso 1 de la auditoría del 25/11, hacelo de Nicolás): bajar/abrir bajan también cuentas.py y, si no está
         junto a loki_sql.py (arranque en la nube), lo dejan ahí: armar-clientes y el control L8 ya no fallan por eso. La apertura
         lee la recompra 4.1 (rec_sku, sin excluidas) en lugar de la tabla `recompra` 3.1; sin rec_sku queda la 3.1.
@@ -88,6 +92,7 @@ CARGA (escribe en la base: solo con hacelo, salvo crm/continuidad que son parte 
   loki_sql.py indexar-cerebro               rearma cerebro_seccion / cerebro_regla / cerebro_router desde la tabla cerebro
   loki_sql.py cargar-fichas fichas.json [FECHA]
   loki_sql.py cargar-script NOMBRE ARCHIVO VERSION
+  loki_sql.py cadena [finnegans|loki|todos]  corre los motores con dc.py (1.15.0; también solo después de cada carga)
   loki_sql.py conocimiento-cargar ARCHIVO.json   {"k_decision": [{"id": .., campo: valor}], ...}: alta o cambio por id en las
                                            tablas k_* (solo columnas que existen; todo o nada). Con hacelo.
   loki_sql.py armar-clientes                rearma clientes / cliente_alias (derivadas; también corre en cada abrir)
@@ -111,7 +116,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.14.0"
+VERSION = "1.15.0"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -738,6 +743,40 @@ def cargar_script(db, nombre, archivo, version):
     t = open(archivo, encoding='utf-8').read()
     transaccion(db, [('INSERT OR REPLACE INTO scripts VALUES (?,?,?,?)', [nombre, version, sha(t), t])])
     return sha(t)
+
+
+# ------------------------------------------------------------------ cadena de motores (1.15.0)
+def buscar_dc():
+    """dc.py junto a este archivo, en LOKI_MOTORES o en el repo Horizon-Motores de la PC."""
+    for d in (os.path.dirname(os.path.abspath(__file__)), os.environ.get('LOKI_MOTORES', ''),
+              os.path.join('C:' + os.sep, 'Horizon', 'Horizon-Motores', 'loki'), os.path.expanduser('~/Horizon-Motores/loki')):
+        if d and os.path.exists(os.path.join(d, 'dc.py')):
+            return os.path.join(d, 'dc.py')
+    return None
+
+
+def cadena(disparo, motivo):
+    """DEC-1124b: después de una carga corre los motores del disparo con dc.py (que corta la cadena si un motor o su auditor
+    falla). Devuelve 0 PASA, 1 FALLA, 2 no corrió. Nunca deshace la carga: solo informa."""
+    if os.environ.get('LOKI_SQL_LOCAL') or os.environ.get('LOKI_SIN_CADENA'):
+        print(f'CADENA salteada ({motivo}): base de prueba o LOKI_SIN_CADENA'); return 2
+    dc = buscar_dc()
+    if not dc:
+        print(f'CADENA AVISO ({motivo}): no corrió, falta dc.py (LOKI_MOTORES o el repo Horizon-Motores/loki)'); return 2
+    env = dict(os.environ)
+    for ca in (os.path.join(os.path.dirname(os.path.abspath(__file__)), 'conauth.py'), os.path.expanduser('~/.loki/conauth.py')):
+        if os.path.exists(ca) and not env.get('LOKI_CONAUTH'):
+            env['LOKI_CONAUTH'] = ca
+    pre = [env['LOKI_CONAUTH']] if env.get('LOKI_CONAUTH') else []
+    r = subprocess.run([sys.executable, '-I', '-X', 'utf8', *pre, dc, 'correr', '--disparo', disparo],
+                       capture_output=True, text=True, cwd=os.path.dirname(dc), env=env)
+    lineas = [x for x in r.stdout.splitlines() if x.startswith('  ')]
+    for x in lineas:
+        print('CADENA' + x)
+    ok = r.returncode == 0 and 'RESULTADO: PASA' in r.stdout
+    print(f"CADENA {disparo} ({motivo}): {'PASA' if ok else 'FALLA · el Publicador no publica; ver dc.py estado'}"
+          + ('' if r.stdout.strip() else f' · {r.stderr.strip()[-200:]}'))
+    return 0 if ok else 1
 
 
 # ------------------------------------------------------------------ bajar
@@ -2549,8 +2588,11 @@ def main(argv):
             init(db); print('OK esquema', ESQUEMA)
         elif op == 'abrir':
             hoy = a[1]
-            return abrir(db, a[0], hoy, a[a.index('--crm') + 1] if '--crm' in a else None, '--reglas' in a, '--incremental' in a,
-                         a[a.index('--origen') + 1] if '--origen' in a else None, '--forzar' in a)
+            rc = abrir(db, a[0], hoy, a[a.index('--crm') + 1] if '--crm' in a else None, '--reglas' in a, '--incremental' in a,
+                       a[a.index('--origen') + 1] if '--origen' in a else None, '--forzar' in a)
+            if '--crm' in a and '--sin-cadena' not in a:
+                cadena('loki', 'abrir con copia del CRM')
+            return rc
         elif op == 'crm-desde':
             print(crm_desde(db, date.fromisoformat(a[0]) if a else date.today()))
         elif op == 'estado':
@@ -2570,6 +2612,8 @@ def main(argv):
                 print(f'RECHAZADO · {a[0]} entra por el auditor: python -I -X utf8 loki/auditor.py entrar <renglones> <cabecera>'
                       ' y después publicar LOTE --hacelo "…"'); return 1
             print('OK', a[0], cargar_reporte(db, a[0], a[1], a[2]), 'filas')
+            if '--sin-cadena' not in a:
+                cadena('todos', 'carga ' + a[0])
         elif op == 'registrar-reporte':
             print('OK registrado', registrar_reporte(db, a[0]))
         elif op == 'bajar-reportes':
@@ -2582,6 +2626,8 @@ def main(argv):
             f = a[a.index('--fecha') + 1] if '--fecha' in a else date.today().isoformat()
             print('OK crm', cargar_crm(db, a[0], f, '--incremental' in a, a[a.index('--origen') + 1] if '--origen' in a else None,
                                        '--forzar' in a))
+            if '--sin-cadena' not in a:
+                cadena('loki', 'copia del CRM')
         elif op == 'cargar-memoria':
             print('OK memoria', cargar_memoria(db, a[0]))
         elif op == 'cargar-continuidad':
@@ -2652,6 +2698,8 @@ def main(argv):
             print('OK', c, a[1])
         elif op == 'conocimiento-cargar':
             print('OK conocimiento', conocimiento_cargar(db, leer_json(a[0])))
+        elif op == 'cadena':   # 1.15.0: correr la cadena a mano (disparo finnegans | loki | todos)
+            return cadena(a[0] if a else 'todos', 'a mano')
         elif op == 'cargar-script':
             print('OK script', a[0], cargar_script(db, a[0], a[1], a[2])[:12])
         else:
