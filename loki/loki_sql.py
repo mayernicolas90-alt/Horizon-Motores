@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
-Loki es independiente: su estado vive en SU base SQL. El CRM FLgX se LEE (ArtifactData) y se copia acá.
+Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.13.0 (24/11, paso 4 del datacenter, hacelo de Nicolás): cargar-crm y abrir --crm exigen --origen (URL o id del CRM) y
+        rechazan cualquier CRM que no sea 5SPm y un incremental de más de 150 fichas (salvo --forzar). La carga queda rotulada
+        «CRM 5SPm» con el origen en meta (antes decía «CRM FLgX» siempre). L9 al abrir: FALLA si una copia del CRM vino de
+        otro origen; AVISO si es anterior a 1.13.0 y no lo registró.
 1.12.0 (24/11, paso 3 del datacenter, hacelo de Nicolás): `clientes` deja de ser tabla y pasa a VISTA sobre el motor Cuentas
         (cue_cuentas + cue_marca + cue_cuit, loki/cuentas.py 0.3, que tiene que estar junto a este archivo). armar-clientes arma
         cliente_alias y corre Cuentas en la misma transacción; armar-crm ya no lee `clientes` (el CUIT de una ficha sin CUIT es
@@ -37,7 +41,7 @@ Solo biblioteca estándar. Correr siempre con python3 -I. El token lo pone el pr
 
 ARRANQUE (lo único que hace la skill):
   loki_sql.py crm-desde [HOY]               qué traer del CRM: COMPLETA (list de todo) o DESDE AAAA-MM-DD (query actualizado >=)
-  loki_sql.py abrir RAIZ HOY [--crm CRM_DIR [--incremental]] [--reglas]
+  loki_sql.py abrir RAIZ HOY [--crm CRM_DIR --origen URL_O_ID_DEL_CRM [--incremental] [--forzar]] [--reglas]
       CRM_DIR = salida de ArtifactData (oportunidades, cotizaciones, muestras): se copia a la base. --incremental si fue
       un query DESDE (solo cambios; las colecciones vacías no dejan carpeta y está bien).
       Baja de la base a RAIZ/DATOS y RAIZ/SCRIPTS solo lo que usan loki.py y memoria_check.py (sha256 verificado),
@@ -74,7 +78,7 @@ CARGA (escribe en la base: solo con hacelo, salvo crm/continuidad que son parte 
   loki_sql.py bajar-reportes DIR           definiciones (Rnn.json) + último CSV de cada código + auditar.py, para auditar
   loki_sql.py reportes                     lista del registro con su última carga
   loki_sql.py cargar-recompra recompra.json META.json
-  loki_sql.py cargar-crm CRM_DIR [--fecha AAAA-MM-DD]
+  loki_sql.py cargar-crm CRM_DIR --origen URL_O_ID_DEL_CRM [--fecha AAAA-MM-DD] [--incremental] [--forzar]
   loki_sql.py cargar-memoria DIR            (DIR/cuentas/*.json, DIR/aprendizajes/*.json)
   loki_sql.py cargar-continuidad continuidad.json
   loki_sql.py cargar-cerebro DIR            (DIR/**/<id>.json; rearma las tablas derivadas del cerebro)
@@ -104,7 +108,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.12.0"
+VERSION = "1.13.0"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -548,10 +552,32 @@ def campos_crm(col, d):
             d.get('fecha') or d.get('creado'), d.get('vence'), d.get('proximaFecha'), d.get('actualizado')]
 
 
-def cargar_crm(db, crm_dir, fecha, incremental=False):
+def origen_crm(o):
+    """Id del Artifact del CRM a partir de su URL o del id solo."""
+    m = re.search(r'artifact/([A-Za-z0-9]+)', str(o or ''))
+    return m.group(1) if m else (str(o).strip() if o else None)
+
+
+# 1.13.0 (paso 4): la copia del CRM solo se alimenta del CRM oficial. FLgX está congelado desde el 24/11 (respaldo):
+# el 24/11 18:16 UTC una sesión cargó un incremental de FLgX (458 fichas) sobre la copia y puntaje, portada y status leyeron
+# datos viejos unas 3 h. Desde ahora cargar-crm exige --origen, rechaza otro CRM y un «incremental» de demasiadas fichas.
+CRM_OFICIAL = '5SPm4UZTgiF5JXx7GKTybq'
+INCREMENTAL_MAX = 150    # fichas de oportunidades en un incremental; más que eso es una copia entera de otro lado
+
+
+def cargar_crm(db, crm_dir, fecha, incremental=False, origen=None, forzar=False):
     """Completa: reemplaza cada colección presente. Incremental: solo agrega/actualiza los documentos bajados
     (los que cambiaron desde la última copia); las colecciones del arranque quedan con corte = fecha."""
+    o = origen_crm(origen)
+    if o != CRM_OFICIAL:
+        raise ValueError(f'cargar-crm RECHAZADO: el origen tiene que ser el CRM oficial {CRM_OFICIAL} (5SPm) y llegó '
+                         f'{o or "nada"}. Pasar --origen con la URL o el id del CRM; FLgX está congelado y no se carga.')
     cols = sorted(c for c in os.listdir(crm_dir) if os.path.isdir(os.path.join(crm_dir, c))) if os.path.isdir(crm_dir) else []
+    if incremental and not forzar and os.path.isdir(os.path.join(crm_dir, 'oportunidades')):
+        k = sum(1 for x in os.listdir(os.path.join(crm_dir, 'oportunidades')) if x.endswith('.json') and not x.startswith('.'))
+        if k > INCREMENTAL_MAX:
+            raise ValueError(f'cargar-crm RECHAZADO: un incremental con {k} fichas (> {INCREMENTAL_MAX}) no es un cambio del día. '
+                             'Si es correcto, hacer la copia completa (sin --incremental) o pasar --forzar.')
     if not incremental and not {'oportunidades', 'cotizaciones'} <= set(cols):
         raise ValueError('cargar-crm: faltan oportunidades o cotizaciones en ' + crm_dir)
     cols = sorted(set(cols) | set(CRM_ARRANQUE))   # una colección vacía (ej. muestras) no deja carpeta
@@ -573,8 +599,8 @@ def cargar_crm(db, crm_dir, fecha, incremental=False):
             n += 1
         conteo[c] = n
         completa = fecha if not incremental else json.loads((prev.get('crm:' + c) or {}).get('meta') or '{}').get('completa')
-        st.append(carga_stmt('crm:' + c, fecha, n, None, 'CRM FLgX ' + ('incremental' if incremental else 'completa'),
-                             {'coleccion': c, 'completa': completa, 'bajados': n}))
+        st.append(carga_stmt('crm:' + c, fecha, n, None, 'CRM 5SPm ' + ('incremental' if incremental else 'completa'),
+                             {'coleccion': c, 'completa': completa, 'bajados': n, 'origen': o}))
         st.append(('UPDATE cargas SET filas=(SELECT COUNT(*) FROM crm WHERE coleccion=?) WHERE fuente=?', [c, 'crm:' + c]))
     transaccion(db, st)
     return conteo
@@ -791,6 +817,17 @@ def controles(db, cg, hoy):
         comp = json.loads(cg[f].get('meta') or '{}').get('completa') if f[4:] in CRM_ARRANQUE else 'x'
         if f[4:] in CRM_ARRANQUE and (not comp or edad(comp) > 7):
             aviso.append(f'L4 {f}: copia completa de más de 7 días (próximo arranque: COMPLETA)')
+    # 1.13.0 L9 (paso 4): toda copia del CRM tiene que venir del CRM oficial
+    sin_origen = []
+    for f in crm:
+        o = json.loads(cg[f].get('meta') or '{}').get('origen')
+        if o and o != CRM_OFICIAL:
+            falla.append(f'L9 {f} vino del CRM {o}, no del oficial 5SPm: no usar; recargar desde 5SPm')
+        elif not o:
+            sin_origen.append(f[4:])
+    if sin_origen:
+        aviso.append('L9 copia del CRM sin origen registrado (anterior a 1.13.0): ' + ', '.join(sorted(sin_origen))
+                     + ' · se corrige con la próxima copia completa con --origen')
     if 'R10' in cg and 'recompra' in cg and str(cg['R10']['corte'])[:10] != str(cg['recompra']['corte'])[:10]:
         aviso.append('L6 recompra y R10 con cortes distintos')
     formato = []
@@ -883,10 +920,10 @@ def apertura(datos, clase, falla, aviso):
     return t if len(t) <= TOPE_APERTURA else t[:TOPE_APERTURA - 30].rsplit('\n', 1)[0] + '\n… (recortado)'
 
 
-def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False):
+def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False, origen=None, forzar=False):
     hoy = date.fromisoformat(hoy_s)
     if crm_dir:
-        n = cargar_crm(db, crm_dir, hoy_s, incremental)
+        n = cargar_crm(db, crm_dir, hoy_s, incremental, origen, forzar)
         print(('CRM actualizado (cambios): ' if incremental else 'CRM copiado completo: ') + ' · '.join(f'{k} {v}' for k, v in n.items()))
     f_baj, cg = bajar(db, raiz)
     try:
@@ -1350,23 +1387,37 @@ def autotest():
         w(f'{base}/CRM/oportunidades/o1.json', json.dumps({'empresa': 'Cli', 'cuit': '30-1-2', 'etapa': 'cotizado', 'monto': 100}))
         w(f'{base}/CRM/cotizaciones/c1.json', json.dumps({'id': 'c1', 'data': {'cliente': 'Cli', 'numero': 'NM1', 'estado': 'enviada', 'total': 121}, 'version': 2}))
         w(f'{base}/CRM/config/datosBancarios.json', '{"cbu":"123"}'); w(f'{base}/CRM/config/tc.json', '{"valor":1}')
-        n2 = cargar_crm(db, f'{base}/CRM', '2026-11-17')
+        for o_mal, nombre in ((None, 'sin --origen'), ('https://claude.ai/artifact/FLgXcongelado', 'FLgX')):
+            try:
+                cargar_crm(db, f'{base}/CRM', '2026-11-17', origen=o_mal); chk(f'1.13.0: CRM {nombre} se rechaza', False)
+            except ValueError as e:
+                chk(f'1.13.0: CRM {nombre} se rechaza', 'RECHAZADO' in str(e) and not q(db, "SELECT 1 FROM crm WHERE coleccion='oportunidades'"))
+        n2 = cargar_crm(db, f'{base}/CRM', '2026-11-17', origen='https://claude.ai/artifact/' + CRM_OFICIAL)
+        m2 = json.loads(q(db, "SELECT origen, meta FROM cargas WHERE fuente='crm:oportunidades'")[0]['meta'])
+        chk('1.13.0: la copia queda rotulada CRM 5SPm con su origen', m2.get('origen') == CRM_OFICIAL
+            and q(db, "SELECT origen FROM cargas WHERE fuente='crm:oportunidades'")[0]['origen'] == 'CRM 5SPm completa')
         chk('CRM sin datos bancarios (D10)', n2.get('config') == 1 and not q(db, "SELECT 1 FROM crm WHERE id='datosBancarios'"))
         chk('envoltorio del Data Center se saca', q(db, 'SELECT numero FROM v_cotizaciones_abiertas')[0]['numero'] == 'NM1')
         w(f'{base}/CRM2/oportunidades/o1.json', '{"empresa":"X"}')
         try:
-            cargar_crm(db, f'{base}/CRM2', '2026-11-17'); chk('CRM sin cotizaciones se rechaza', False)
+            cargar_crm(db, f'{base}/CRM2', '2026-11-17', origen=CRM_OFICIAL); chk('CRM sin cotizaciones se rechaza', False)
         except ValueError:
             chk('CRM sin cotizaciones se rechaza', q(db, "SELECT COUNT(*) n FROM crm WHERE coleccion='cotizaciones'")[0]['n'] == 1)
         chk('crm-desde tras copia completa', crm_desde(db, date(2026, 11, 18)) == 'DESDE 2026-11-17')
         w(f'{base}/INC/oportunidades/o2.json', '{"empresa":"Nueva","actualizado":"2026-11-18"}')
-        cargar_crm(db, f'{base}/INC', '2026-11-18', incremental=True)
+        cargar_crm(db, f'{base}/INC', '2026-11-18', incremental=True, origen=CRM_OFICIAL)
         chk('incremental agrega sin borrar', q(db, "SELECT COUNT(*) n FROM crm WHERE coleccion='oportunidades'")[0]['n'] == 2
             and q(db, "SELECT filas FROM cargas WHERE fuente='crm:oportunidades'")[0]['filas'] == 2
             and q(db, "SELECT corte FROM cargas WHERE fuente='crm:cotizaciones'")[0]['corte'] == '2026-11-18')
         chk('a los 8 días pide COMPLETA', crm_desde(db, date(2026, 11, 25)) == 'COMPLETA')
         w(f'{base}/INC2/oportunidades/o1.json', '{"empresa":"Cli editada","actualizado":"2026-11-18"}')
-        cargar_crm(db, f'{base}/INC2', '2026-11-18', incremental=True)
+        cargar_crm(db, f'{base}/INC2', '2026-11-18', incremental=True, origen=CRM_OFICIAL)
+        for i in range(INCREMENTAL_MAX + 1):
+            w(f'{base}/INC3/oportunidades/x{i}.json', '{"empresa":"Masiva"}')
+        try:
+            cargar_crm(db, f'{base}/INC3', '2026-11-18', incremental=True, origen=CRM_OFICIAL); chk('1.13.0: incremental masivo se rechaza', False)
+        except ValueError as e:
+            chk('1.13.0: incremental masivo se rechaza', 'RECHAZADO' in str(e) and not q(db, "SELECT 1 FROM crm WHERE empresa='Masiva'"))
         chk('incremental actualiza un documento existente', q(db, "SELECT empresa FROM crm WHERE id='o1'")[0]['empresa'] == 'Cli editada')
         try:
             transaccion(db, [("UPDATE crm SET empresa='ROTO' WHERE id='o1'", []), ('INSERT INTO tabla_que_no_existe VALUES (1)', [])])
@@ -2461,7 +2512,8 @@ def main(argv):
             init(db); print('OK esquema', ESQUEMA)
         elif op == 'abrir':
             hoy = a[1]
-            return abrir(db, a[0], hoy, a[a.index('--crm') + 1] if '--crm' in a else None, '--reglas' in a, '--incremental' in a)
+            return abrir(db, a[0], hoy, a[a.index('--crm') + 1] if '--crm' in a else None, '--reglas' in a, '--incremental' in a,
+                         a[a.index('--origen') + 1] if '--origen' in a else None, '--forzar' in a)
         elif op == 'crm-desde':
             print(crm_desde(db, date.fromisoformat(a[0]) if a else date.today()))
         elif op == 'estado':
@@ -2491,7 +2543,8 @@ def main(argv):
             print('OK recompra', cargar_recompra(db, a[0], a[1]), 'filas')
         elif op == 'cargar-crm':
             f = a[a.index('--fecha') + 1] if '--fecha' in a else date.today().isoformat()
-            print('OK crm', cargar_crm(db, a[0], f, '--incremental' in a))
+            print('OK crm', cargar_crm(db, a[0], f, '--incremental' in a, a[a.index('--origen') + 1] if '--origen' in a else None,
+                                       '--forzar' in a))
         elif op == 'cargar-memoria':
             print('OK memoria', cargar_memoria(db, a[0]))
         elif op == 'cargar-continuidad':

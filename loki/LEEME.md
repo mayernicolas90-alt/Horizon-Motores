@@ -6,7 +6,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 
 | Archivo | Versión | Qué hace | Autotest |
 |---|---|---|---|
-| `loki_sql.py` | 1.12.0 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status. Desde 1.12.0 `clientes` es una vista sobre el motor Cuentas (necesita `cuentas.py` en la misma carpeta) | `--autotest` (93/93) |
+| `loki_sql.py` | 1.13.0 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status. Desde 1.12.0 `clientes` es una vista sobre el motor Cuentas (necesita `cuentas.py` en la misma carpeta) | `--autotest` (97/97) |
 | `loki.py` | v3 | Números de la apertura y urgentes (lo llama `loki_sql.py abrir`) | — |
 | `motor.py` | 1.2.0 | Pedidos de producto: lista del CRM, stock (Hive en vivo o R8), fichas técnicas | `--autotest` (28/28) |
 | `motor_regresion.py` | 1.0 | Corre un `motor.py` sobre las cotizaciones del CRM para comparar versiones | — |
@@ -34,6 +34,6 @@ y, si da FALLA, no se publica nada. Motores: Limpieza (`importar.py`) y Recompra
 Loki vive **solo en la nube** (claude.ai/code): el token de Turso lo pone el proxy del entorno. Finnegans se adjunta en el chat; los cambios de motores van por rama + PR en este repositorio y, aprobados, se cargan con la misma huella a la tabla `scripts` de la base.
 
 ```
-python3 -I loki_sql.py abrir RAIZ AAAA-MM-DD --crm RAIZ/CRM --reglas
+python3 -I loki_sql.py abrir RAIZ AAAA-MM-DD --crm RAIZ/CRM --origen https://claude.ai/artifact/5SPm4UZTgiF5JXx7GKTybq --reglas
 python3 -I RAIZ/SCRIPTS/bitacora2.py chequear turso AAAA-MM-DD
 ```
