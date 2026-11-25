@@ -2,6 +2,10 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM FLgX se LEE (ArtifactData) y se copia acá.
+1.12.0 (24/11, paso 3 del datacenter, hacelo de Nicolás): `clientes` deja de ser tabla y pasa a VISTA sobre el motor Cuentas
+        (cue_cuentas + cue_marca + cue_cuit, loki/cuentas.py 0.3, que tiene que estar junto a este archivo). armar-clientes arma
+        cliente_alias y corre Cuentas en la misma transacción; armar-crm ya no lee `clientes` (el CUIT de una ficha sin CUIT es
+        su primer cuitsAdicionales), así que abrir corre primero armar-crm y después armar-clientes. Esquema 7.
 1.11.0 (23/11): la puerta de entrada. R4/R6/R7/R10/R15/R23 ya no se cargan con cargar-reporte: entran por loki/auditor.py
         (recibir → clasificar → verificar → publicar con «hacelo»); abrir muestra CUARENTENA y lo verificado sin publicar.
 1.10.1 (22/11):cargar-continuidad exige `importante` no vacío y abrir no se cae si falta (una sesión la dejó en null).
@@ -87,6 +91,7 @@ CARGA (escribe en la base: solo con hacelo, salvo crm/continuidad que son parte 
 import base64
 import csv
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -99,10 +104,10 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
-ESQUEMA = 6
+ESQUEMA = 7
 CRM_ARRANQUE = ('oportunidades', 'cotizaciones', 'muestras')
 CRM_PRIVADO = {('config', 'datosBancarios')}          # D10: datos bancarios no se copian
 TOPE_APERTURA = 3200
@@ -159,8 +164,11 @@ DDL = [
     "CREATE INDEX IF NOT EXISTS bitacora_fecha ON bitacora (fecha)",
     "CREATE INDEX IF NOT EXISTS bitacora_cuit ON bitacora (cuit)",
     "CREATE INDEX IF NOT EXISTS bitacora_estado ON bitacora (estado, tipo)",
-    "CREATE TABLE IF NOT EXISTS clientes (cuit TEXT PRIMARY KEY, razon_social TEXT, crm_id TEXT, fichas INTEGER, lleva TEXT,"
-    " otro_vendedor TEXT, no_prospectar INTEGER, archivada INTEGER, unificada_en TEXT, fuentes TEXT, armado TEXT)",
+    # 1.12.0: `clientes` es una vista (vista_clientes) sobre las tablas del motor Cuentas; acá solo se crean vacías para una base nueva
+    "CREATE TABLE IF NOT EXISTS cue_cuentas (clave, cuit, crm_id, empresa, estado, trabajar, compartida, motivo, fuentes, conflicto,"
+    " ficha, razon, archivada, unificada_en)",
+    "CREATE TABLE IF NOT EXISTS cue_marca (clave, marca, valor, fuente)",
+    "CREATE TABLE IF NOT EXISTS cue_cuit (cuit, clave, tipo, razon, fichas, lleva, fuentes, armado)",
     "CREATE TABLE IF NOT EXISTS cliente_alias (alias_norm TEXT NOT NULL, alias TEXT, cuit TEXT NOT NULL, fuente TEXT,"
     " PRIMARY KEY (alias_norm, cuit, fuente))",
     "CREATE VIEW IF NOT EXISTS v_bitacora_abierta AS SELECT id, fecha, tipo, cuit, cuenta, tema, texto FROM bitacora"
@@ -882,11 +890,11 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False):
         print(('CRM actualizado (cambios): ' if incremental else 'CRM copiado completo: ') + ' · '.join(f'{k} {v}' for k, v in n.items()))
     f_baj, cg = bajar(db, raiz)
     try:
-        nc, na = armar_clientes(db)
-        try:
+        try:   # 1.12.0: primero el CRM en tablas; clientes (motor Cuentas) lee crm_oportunidad
             ncrm = armar_crm(db)
         except Exception as e:  # noqa: BLE001  la apertura no se cae por esto
             ncrm = f'no corrió ({str(e)[:80]})'
+        nc, na = armar_clientes(db)
         cal = calidad(db)
         if cal['sin_cuit_con_dato'] or cal['cot_sin_revision'] or cal['cuit_duplicado']:
             extra_aviso = [f"L8 calidad: sin CUIT con venta/cotización {cal['sin_cuit_con_dato']} · cotización abierta sin fecha de revisión "
@@ -1495,9 +1503,12 @@ def autotest():
                 ("INSERT OR REPLACE INTO crm (coleccion,id,empresa,cuit,estado,data) VALUES ('oportunidades','o5','Otra bis','30-9-9','prospecto','{}')", []),
                 ("UPDATE crm SET cuit='30-12345678-9' WHERE id='o1'", []), ("UPDATE ventas SET cuit='30-12345678-9'", []),
                 ("UPDATE cuentas SET cuit='30-12345678-9'", [])])
+        armar_crm(db)
         nc, na = armar_clientes(db)
         chk('clientes por CUIT (DNI/CUIT mal formado fuera)', nc == 1 and q(db, 'SELECT crm_id FROM clientes')[0]['crm_id'] == 'o1')
         chk('alias: nombre de factura y de ficha → mismo CUIT', buscar_cuit(db, 'CLI') == [('30-12345678-9', 'Cli editada')])
+        chk('1.12.0: clientes es una vista sobre el motor Cuentas',
+            q(db, "SELECT type FROM sqlite_master WHERE name='clientes'")[0]['type'] == 'view')
         armar_clientes(db)
         chk('armar-clientes idempotente', q(db, 'SELECT COUNT(*) n FROM clientes')[0]['n'] == 1)
         cal = calidad(db)
@@ -1555,8 +1566,8 @@ def autotest():
                 ("INSERT OR REPLACE INTO crm (coleccion,id,estado,data) VALUES ('cotizaciones','k6','aceptada',?)", [json.dumps(cot6)]),
                 ("INSERT OR REPLACE INTO crm (coleccion,id,estado,data) VALUES ('cotizaciones','k7','aceptada',?)", [json.dumps(cot7)]),
                 ("INSERT OR REPLACE INTO crm (coleccion,id,estado,data) VALUES ('muestras','m6','enviada',?)", [json.dumps(mu6)])])
-        armar_clientes(db)
         n6 = armar_crm(db)
+        armar_clientes(db)
         tot = {x: q(db, f"SELECT COUNT(*) n FROM crm WHERE coleccion='{x}'")[0]['n'] for x in ('oportunidades', 'cotizaciones', 'muestras')}
         chk('armar-crm: una fila por documento', n6['oportunidades'] == tot['oportunidades'] and n6['cotizaciones'] == tot['cotizaciones']
             and n6['muestras'] == tot['muestras'] and q(db, 'SELECT COUNT(*) n FROM crm_oportunidad')[0]['n'] == tot['oportunidades'])
@@ -1652,44 +1663,73 @@ def cuit_ok(c):
     return f'{d[:2]}-{d[2:10]}-{d[10]}' if len(d) == 11 else None
 
 
+def cuits_ficha(cuit, d):
+    """CUIT propio de la ficha y sus cuitsAdicionales (lista de textos o de {cuit, nombre}), normalizados y sin vacíos."""
+    ad = d.get('cuitsAdicionales') if isinstance(d.get('cuitsAdicionales'), list) else []
+    cs = [cuit_ok(cuit)] + [cuit_ok(x.get('cuit') if isinstance(x, dict) else x) for x in ad]
+    return [x for x in cs if x]
+
+
+# 1.12.0: la vista `clientes` (paso 3). Una fila por CUIT de 11 dígitos de cue_cuit: el principal de cada cuenta lleva la ficha
+# elegida y las marcas (de cue_marca, todas las fuentes); un CUIT adicional figura con su razón social, sin ficha ni marcas.
+VISTA_CLIENTES = (
+    "CREATE VIEW clientes AS SELECT substr(u.cuit,1,2)||'-'||substr(u.cuit,3,8)||'-'||substr(u.cuit,11,1) AS cuit,"
+    " u.razon AS razon_social, CASE WHEN u.tipo='principal' THEN c.ficha END AS crm_id, u.fichas, u.lleva,"
+    " CASE WHEN u.tipo='principal' AND EXISTS (SELECT 1 FROM cue_marca m WHERE m.clave=c.clave AND m.marca='otro_vendedor')"
+    "  THEN '1' END AS otro_vendedor,"
+    " CASE WHEN u.tipo='principal' AND EXISTS (SELECT 1 FROM cue_marca m WHERE m.clave=c.clave AND m.marca='no_prospectar')"
+    "  THEN 1 ELSE 0 END AS no_prospectar,"
+    " CASE WHEN u.tipo='principal' AND c.ficha IS NOT NULL THEN"
+    "  EXISTS (SELECT 1 FROM cue_marca m WHERE m.clave=c.clave AND m.marca='archivada') END AS archivada,"
+    " CASE WHEN u.tipo='principal' THEN (SELECT MIN(m.valor) FROM cue_marca m WHERE m.clave=c.clave AND m.marca='unificada')"
+    "  END AS unificada_en,"
+    " u.fuentes, u.armado FROM cue_cuit u JOIN cue_cuentas c ON c.clave=u.clave WHERE length(u.cuit)=11")
+
+
+def vista_clientes(db):
+    """Sentencias para dejar `clientes` como vista (si era la tabla de antes de 1.12.0, se borra: era derivada)."""
+    t = q(db, "SELECT type FROM sqlite_master WHERE name='clientes'")
+    st = [('DROP TABLE clientes', [])] if t and t[0]['type'] == 'table' else []
+    return st + [('DROP VIEW IF EXISTS clientes', []), (VISTA_CLIENTES, [])]
+
+
+def motor_cuentas():
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cuentas.py')
+    if not os.path.exists(ruta):
+        raise RuntimeError('falta cuentas.py junto a loki_sql.py (1.12.0: clientes sale del motor Cuentas)')
+    sp = importlib.util.spec_from_file_location('cuentas', ruta)
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
 def armar_clientes(db):
-    """Rearma clientes y cliente_alias desde crm (oportunidades), ventas (solo HORIZON) y cuentas. Todo o nada."""
-    cli, alias = {}, set()
-    def base(c):
-        return cli.setdefault(c, dict(razon=None, crm_id=None, fichas=0, lleva=None, otro=None, nop=0, arch=1, unif=None, fuentes=set()))
+    """Rearma cliente_alias (crm, ventas solo HORIZON y cuentas) y corre el motor Cuentas (cue_cuentas, cue_marca, cue_cuit);
+    `clientes` es la vista sobre esas tablas. Lee crm_oportunidad: correr antes armar_crm. Todo o nada."""
+    alias = set()
     r_opo, r_ven, r_cue = qs(db, [   # 1.8.0: un viaje (antes 3)
         "SELECT id, empresa, cuit, data FROM crm WHERE coleccion='oportunidades'",
         "SELECT cuit, MAX(cliente) cliente FROM ventas WHERE empresa LIKE 'HORIZON TRADING%' GROUP BY cuit, cliente",
         'SELECT empresa, cuit, lleva FROM cuentas'])
     for r in r_opo:
-        d = json.loads(r['data'])
-        cs = [cuit_ok(r['cuit'])] + [cuit_ok(x) for x in (d.get('cuitsAdicionales') or []) if isinstance(d.get('cuitsAdicionales'), list)]
-        for k, c in enumerate(x for x in cs if x):
-            b = base(c); b['fuentes'].add('crm'); b['fichas'] += 1
-            activa = not d.get('archivada') and not d.get('unificadaEn')
-            if k == 0 and (b['crm_id'] is None or (activa and b['arch'])):
-                b.update(razon=r['empresa'], crm_id=r['id'], arch=0 if activa else 1, unif=d.get('unificadaEn'),
-                         nop=1 if d.get('noProspectar') == 'si' else 0, otro=d.get('otroVendedor') or None)
+        for c in cuits_ficha(r['cuit'], json.loads(r['data'])):
             if r['empresa']:
                 alias.add((norm(r['empresa']), r['empresa'], c, 'crm'))
     for r in r_ven:
         c = cuit_ok(r['cuit'])
-        if not c:
-            continue
-        b = base(c); b['fuentes'].add('ventas'); b['razon'] = b['razon'] or r['cliente']
-        alias.add((norm(r['cliente']), r['cliente'], c, 'ventas'))
+        if c:
+            alias.add((norm(r['cliente']), r['cliente'], c, 'ventas'))
     for r in r_cue:
         c = cuit_ok(r['cuit'])
-        if not c:
-            continue
-        b = base(c); b['fuentes'].add('cuentas'); b['lleva'] = r['lleva']; b['razon'] = b['razon'] or r['empresa']
-        alias.add((norm(r['empresa']), r['empresa'], c, 'cuentas'))
-    st = [('DELETE FROM clientes', []), ('DELETE FROM cliente_alias', [])]
-    st += [('INSERT INTO clientes VALUES (?,?,?,?,?,?,?,?,?,?,?)', [c, b['razon'], b['crm_id'], b['fichas'], b['lleva'], b['otro'], b['nop'],
-            b['arch'] if b['crm_id'] else None, b['unif'], ','.join(sorted(b['fuentes'])), ahora()]) for c, b in sorted(cli.items())]
-    st += [('INSERT OR IGNORE INTO cliente_alias VALUES (?,?,?,?)', list(a)) for a in sorted(alias) if a[0]]
-    transaccion(db, st)
-    return len(cli), len({a[0] for a in alias if a[0]})
+        if c:
+            alias.add((norm(r['empresa']), r['empresa'], c, 'cuentas'))
+    alias = sorted(a for a in alias if a[0])
+    cu = motor_cuentas()
+    regla, opos, cuentas, _, comp, ventas = cu.leer(db)
+    r = cu.calcular_todo(regla, opos, cuentas, [dict(alias=a[1], cuit=a[2]) for a in alias], comp, ventas, armado=ahora())
+    st = [('DELETE FROM cliente_alias', [])] + [('INSERT OR IGNORE INTO cliente_alias VALUES (?,?,?,?)', list(a)) for a in alias]
+    transaccion(db, st + cu.sentencias(r) + vista_clientes(db))
+    return q(db, 'SELECT COUNT(*) n FROM clientes')[0]['n'], len({a[0] for a in alias})
 
 
 def buscar_cuit(db, texto, exacto=False):
@@ -1853,21 +1893,20 @@ def _si(v):
 
 
 def armar_crm(db):
-    """Rearma las tablas crm_* desde la copia `crm` (todo o nada). CUIT: el del documento; si no, el de `clientes`
-    (por crm_id o cuitsAdicionales); cotizaciones y muestras heredan el de su oportunidad. Devuelve conteos."""
-    r_cli, r_opo, r_cot, r_mue = qs(db, [   # 1.8.0: un viaje (antes 4)
-        'SELECT crm_id, cuit FROM clientes WHERE crm_id IS NOT NULL',
-        "SELECT id, data FROM crm WHERE coleccion='oportunidades' ORDER BY id",
+    """Rearma las tablas crm_* desde la copia `crm` (todo o nada). CUIT: el del documento; si no, el primero de sus
+    cuitsAdicionales (1.12.0: ya no lee `clientes`, que ahora sale de crm_oportunidad); cotizaciones y muestras heredan
+    el de su oportunidad. Devuelve conteos."""
+    r_opo, r_cot, r_mue = qs(db, [   # 1.8.0: un viaje
+        "SELECT id, cuit, data FROM crm WHERE coleccion='oportunidades' ORDER BY id",
         "SELECT id, data FROM crm WHERE coleccion='cotizaciones' ORDER BY id",
         "SELECT id, data FROM crm WHERE coleccion='muestras' ORDER BY id"])
-    cuit_por_opo = {r['crm_id']: r['cuit'] for r in r_cli}
     st = [('DELETE FROM ' + x, []) for x in ('crm_oportunidad', 'crm_contacto', 'crm_historial', 'crm_cotizacion',
                                              'crm_cotizacion_item', 'crm_muestra')]
     n = dict(oportunidades=0, contactos=0, historial=0, cotizaciones=0, items=0, muestras=0)
     opo_cuit = {}
     for r in r_opo:
         d = json.loads(r['data'])
-        c = cuit_ok(d.get('cuit')) or cuit_por_opo.get(r['id'])
+        c = cuit_ok(d.get('cuit')) or cuit_ok(r['cuit']) or (cuits_ficha(None, d) or [None])[0]
         opo_cuit[r['id']] = c
         fila = []
         for col, k in OPO_COLS:
@@ -2209,7 +2248,8 @@ def _copia_local(db):
                  + [('SELECT numero, cuit, falta FROM v_ganadas_sin_despacho', [])])
     ddl = {n: s_ for n, s_ in res[0][1]}
     for t, (cols, filas) in zip(ST_TABLAS, res[1:-1]):
-        loc.run([(ddl[t], [])])
+        # 1.12.0: `clientes` es una vista sobre tablas que no se copian: en la copia va como tabla con sus columnas
+        loc.run([(ddl[t] if not ddl[t].lstrip().upper().startswith('CREATE VIEW') else f'CREATE TABLE {t} ({", ".join(cols)})', [])])
         if filas:
             loc.run([(f'INSERT INTO {t} VALUES ({",".join("?" * len(cols))})', f) for f in filas])
     loc.run([('CREATE TABLE v_ganadas_sin_despacho (numero TEXT, cuit TEXT, falta TEXT)', [])]
@@ -2489,11 +2529,11 @@ def main(argv):
             i = anotar(db, 'hecho', 'cierra #' + a[0], a[1], cierra=a[0], chat=a[a.index('--chat') + 1] if '--chat' in a else None)
             print(f'OK #{a[0]} cerrado por #{i}')
         elif op == 'migrar-continuidad':
-            armar_clientes(db); print('OK migradas', migrar_continuidad(db), 'filas')
+            armar_crm(db); armar_clientes(db); print('OK migradas', migrar_continuidad(db), 'filas')
         elif op == 'armar-crm':
             print('OK crm en tablas', armar_crm(db))
         elif op == 'armar-clientes':
-            print('OK clientes %s · alias %s' % armar_clientes(db))
+            armar_crm(db); print('OK clientes %s · alias %s' % armar_clientes(db))
         elif op == 'calidad':
             print(calidad(db, True))
         elif op == 'cliente':
