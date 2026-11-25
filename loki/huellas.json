@@ -4,8 +4,8 @@
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "f404ba7204ef",
-   "version": "1.14.0",
+   "huella": "bfe310cdb4aa",
+   "version": "1.15.0",
    "test": [
     "--autotest"
    ]
@@ -78,8 +78,8 @@
   },
   "dc.py": {
    "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "101166408b46",
-   "version": "0.7",
+   "huella": "82bb51187cf6",
+   "version": "0.8",
    "test": [
     "--autotest"
    ]
@@ -126,7 +126,7 @@
   },
   "auditor.py": {
    "origen": "nuevo 23/11 (Fase 1 del plan «auditor de entrada»): recibir, clasificar, verificar y publicar los reportes de Finnegans; probado en copia local: Reporte (27) a cuarentena, Reportedsd verificado y publicado (1457 filas); 0.2 (24/11): ventas (R10) solo con los renglones de Horizon (1.219 de 1.457 al 20/11), R7 completo",
-   "huella": "e13c47d54f4f",
+   "huella": "6a954a130185",
    "version": "0.2",
    "test": [
     "--autotest"

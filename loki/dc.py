@@ -25,7 +25,9 @@ Uso (python3 -I):
 """
 import datetime as D, hashlib, importlib.util, json, os, subprocess, sys
 
-VERSION = 'dc 0.7 · 2026-11-24'
+VERSION = 'dc 0.8 · 2026-11-25'
+# 0.8 (25/11, paso 2): con LOKI_CONAUTH (PC) cada motor y el auditor corren a través de conauth.py, que pone el token de Turso.
+PRE = [os.environ['LOKI_CONAUTH']] if os.environ.get('LOKI_CONAUTH') else []
 AQUI = os.path.dirname(os.path.abspath(__file__))
 MOTORES = ['importar.py', 'recompra.py', 'cuentas.py', 'puntaje.py', 'portada.py']   # en orden: un motor solo lee lo que dejaron los anteriores
 AUDITOR = 'auditor_dc.py'
@@ -132,7 +134,7 @@ def correr(disparo, forzar=False, solo=None, loki_ruta=None):
         cid = db.run([('INSERT INTO dc_corridas(motor,disparo,inicio,estado,huella_entrada) VALUES(?,?,?,?,?) RETURNING id',
                        [c['id'], disparo, ini, 'CORRIENDO', h])])[0][1][0][0]
         antes = conteos(db, excluir=PROPIAS + tuple(c['escribe']))
-        r = subprocess.run([sys.executable, '-I', '-X', 'utf8', os.path.join(AQUI, c['archivo']), 'correr', '--loki', ruta],
+        r = subprocess.run([sys.executable, '-I', '-X', 'utf8', *PRE, os.path.join(AQUI, c['archivo']), 'correr', '--loki', ruta],
                            capture_output=True, text=True, cwd=AQUI)
         res = next((l[8:] for l in reversed(r.stdout.splitlines()) if l.startswith('RESUMEN ')), '')
         despues = conteos(db, excluir=PROPIAS + tuple(c['escribe']))
@@ -141,7 +143,7 @@ def correr(disparo, forzar=False, solo=None, loki_ruta=None):
         est = 'OK' if r.returncode == 0 else 'ERROR'
         db.run([('UPDATE dc_corridas SET fin=?, estado=?, resumen=?, fuera_contrato=? WHERE id=?',
                  [ahora(), est, res or (r.stderr or r.stdout)[-500:], json.dumps(fuera), cid])])
-        a = subprocess.run([sys.executable, '-I', '-X', 'utf8', os.path.join(AQUI, AUDITOR), 'correr', '--corrida', str(cid), '--loki', ruta],
+        a = subprocess.run([sys.executable, '-I', '-X', 'utf8', *PRE, os.path.join(AQUI, AUDITOR), 'correr', '--corrida', str(cid), '--loki', ruta],
                            capture_output=True, text=True, cwd=AQUI)
         veredicto = next((l.split()[1] for l in reversed(a.stdout.splitlines()) if l.startswith('AUDITOR ')), 'ERROR')
         db.run([('UPDATE dc_corridas SET auditor=? WHERE id=?', [veredicto, cid])])
