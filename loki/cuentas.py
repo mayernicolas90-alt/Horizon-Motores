@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cuentas.py 0.3 · motor Cuentas del datacenter (24/11/2026, DEC-1124a/b). Solo biblioteca estándar.
+"""cuentas.py 0.4 · motor Cuentas del datacenter (24/11/2026, DEC-1124a/b). Solo biblioteca estándar.
 
 Dice, para cada cliente, si se trabaja o no y por qué, y une cada CUIT de Finnegans con su ficha del CRM.
 Fuentes (todas en Turso):
@@ -20,12 +20,14 @@ Cuando dos fuentes se contradicen no decide: lo deja en «conflicto» para que l
 de una ficha: si la cuenta tiene una ficha viva, las fichas unificadas en ella no le pasan marcas (Punta Alta, Full Play,
 r140); la unificada no hereda de sí misma; CUIT adicionales de la ficha (cuitsAdicionales) en cue_cuit; una ficha sin
 CUIT propio toma el primer adicional (r140 → CUIT de Mónica Martínez), como hacía clientes.
+0.4 (24/11, Nicolás: «unila»): un CUIT adicional cuya cuenta era solo de Finnegans (sin ficha) se une a la cuenta de su ficha
+(Montevision → Nodo Net); con ficha propia sigue en conflicto.
 
 Uso (python3 -I): cuentas.py --contrato · cuentas.py --autotest · cuentas.py correr [--loki ruta] · cuentas.py simular
 """
 import importlib.util, json, os, re, sys, unicodedata
 
-VERSION = 'cuentas 0.3 · 2026-11-24'
+VERSION = 'cuentas 0.4 · 2026-11-24'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 CONTRATO = {'id': 'cuentas', 'nombre': 'Cuentas', 'disparo': 'loki',
             'lee': ['k_regla', 'crm_oportunidad', 'cuentas', 'cliente_alias', 'limpia_comprobantes', 'ventas'],
@@ -141,11 +143,15 @@ def calcular_todo(regla, oportunidades, cuentas, alias, compradores, ventas=(), 
         f = fila(c, cuit=c, empresa=rs)
         f['fuentes'].add('finnegans')
         f.setdefault('razon_social', rs)
-    # CUIT adicionales: los que no tienen cuenta propia se suman a la cuenta de su ficha; si ya tienen una, no se elige:
-    # queda en conflicto (salvo que su única ficha esté unificada en esa misma cuenta, como Gomez Leandro → Disnet)
+    # CUIT adicionales: los que no tienen cuenta propia, o cuya cuenta es solo de Finnegans/cuentas (sin ficha), se suman a
+    # la cuenta de su ficha: el vínculo lo declaró Nicolás en el CRM (0.4: Montevision → Nodo Net, 24/11). Si el CUIT tiene
+    # una ficha propia no se elige: queda en conflicto (salvo que esté unificada en esa misma cuenta, como Gomez → Disnet)
     adic = []
     for a, clave, fid in pendientes:
         g = filas.get(a)
+        if g is not None and not g['fichas_l'] and a != clave:
+            del filas[a]
+            g = None
         if g is None:
             adic.append((a, clave))
             continue
@@ -319,7 +325,8 @@ def autotest():
             O('r1', 'Contratista', '', extra=X([{'cuit': '27-60', 'nombre': 'Mónica'}, {'cuit': '20-61'}])),
             O('m1', 'Mónica', '27-60', archivada=1, unificada_en='r1'),
             O('n1', 'Nodo', '30-62', extra=X([{'cuit': '30-63'}])), O('g1', 'Gomez', '20-64', archivada=1, unificada_en='d1'),
-            O('d1', 'Disnet', '30-65', extra=X([{'cuit': '20-64'}]))]
+            O('d1', 'Disnet', '30-65', extra=X([{'cuit': '20-64'}])),
+            O('t1', 'Ajena', '30-66'), O('t2', 'Reclama', '30-67', extra=X([{'cuit': '30-66'}]))]
     r3 = calcular_todo(d07, ops3, [], [], {'3063': 'Montevision'}, [dict(cuit='30-63', cliente='Montevision')])
     G = lambda clave: next(f for f in r3['filas'] if f['clave'] == clave)
     M = lambda clave: sorted({m['marca'] for m in r3['marcas'] if m['clave'] == clave})
@@ -333,8 +340,11 @@ def autotest():
          G('2760')['ficha'] == 'r1' and M('2760') == [] and G('2760')['trabajar'] == 1),
         ('0.3: el resto de los adicionales sin cuenta propia va a cue_cuit de esa cuenta (Ripoll)',
          C.get('2061', {}).get('clave') == '2760' and C['2061']['tipo'] == 'adicional'),
-        ('0.3: adicional con cuenta propia de Finnegans: no se elige, queda en conflicto (Montevision)',
-         '3063' not in [c['cuit'] for c in r3['cuits'] if c['tipo'] == 'adicional'] and 'adicional' in (G('3063')['conflicto'] or '')),
+        ('0.4: adicional con cuenta solo de Finnegans (sin ficha) se une a la cuenta de su ficha (Montevision → Nodo)',
+         C.get('3063', {}).get('clave') == '3062' and C['3063']['tipo'] == 'adicional' and C['3063']['razon'] == 'Montevision'
+         and not any(f['clave'] == '3063' for f in r3['filas'])),
+        ('0.4: adicional con ficha propia no se elige: queda en conflicto',
+         'adicional' in (G('3066')['conflicto'] or '') and C['3066']['tipo'] == 'principal'),
         ('0.3: adicional cuya única ficha está unificada en la cuenta: sin conflicto (Gomez → Disnet)',
          not G('2064')['conflicto'] and M('2064') == ['archivada', 'unificada'] and G('2064')['trabajar'] == 1),
         ('0.3: cada CUIT figura una sola vez en cue_cuit', len(r3['cuits']) == len({c['cuit'] for c in r3['cuits']})),
