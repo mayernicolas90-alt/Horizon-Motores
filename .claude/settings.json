@@ -1,10 +1,20 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(python3 -I *loki_sql.py*)",
+      "Bash(python3 -I *bitacora2.py*)",
+      "Bash(python3 -I -X utf8 controles/correr.py*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "ArtifactData",
         "hooks": [
-          { "type": "command", "command": "python3 -I \"$CLAUDE_PROJECT_DIR/controles/hooks/guardia_hacelo.py\"" }
+          {
+            "type": "command",
+            "command": "python3 -I \"$CLAUDE_PROJECT_DIR/controles/hooks/guardia_hacelo.py\""
+          }
         ]
       }
     ]
