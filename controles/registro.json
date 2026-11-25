@@ -84,6 +84,19 @@
    "nota": "24/11 (hacelo de Nicolás): ventas es la fuente (R10 verificado por el auditor) y limpia_* derivadas; no pasa a vista porque las limpias no tienen importe ni pte_dest."
   },
   {
+   "id": "C08",
+   "error": "Una sesión cargó el CRM FLgX (congelado) sobre la copia de 5SPm y nadie lo frenó (24/11 18:16 UTC)",
+   "fecha": "2026-11-24",
+   "tipo": "caso",
+   "archivo": "controles/c08_origen_crm.py",
+   "corre": [
+    "ci",
+    "diario"
+   ],
+   "leccion": "L-dos-cuentas",
+   "nota": "Paso 4 del datacenter (hacelo de Nicolás): loki_sql 1.13.0 exige --origen 5SPm en cargar-crm y abrir --crm; L9 al abrir."
+  },
+  {
    "id": "G01",
    "error": "Se subió código de Loki al repositorio de la otra cuenta, o firmado por la otra cuenta",
    "fecha": "2026-11-21",
