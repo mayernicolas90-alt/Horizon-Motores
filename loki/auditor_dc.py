@@ -129,7 +129,9 @@ def controles_cuentas(db, R):
     R('C3', 'hay cuentas excluidas por la regla', 'PASA' if excl >= len(np_) // 2 else 'AVISO', f'{excl} cuentas excluidas para {len(np_) + len(ov)} nombres en la regla')
     con = q(db, 'SELECT empresa, conflicto FROM cue_cuentas WHERE conflicto IS NOT NULL')
     R('C4', 'conflictos entre fuentes para definir', 'AVISO' if con else 'PASA', '; '.join(f"{c['empresa']}: {c['conflicto'][:80]}" for c in con) or 'ninguno')
-    falta = uno(db, "SELECT count(DISTINCT cuit) FROM limpia_comprobantes WHERE cuit <> '' AND cuit NOT IN (SELECT coalesce(cuit,'') FROM cue_cuentas)")
+    # cuentas 0.3: un CUIT adicional (cue_cuit) es parte de la cuenta de su ficha, aunque no tenga fila propia
+    falta = uno(db, "SELECT count(DISTINCT cuit) FROM limpia_comprobantes WHERE cuit <> '' AND cuit NOT IN (SELECT coalesce(cuit,'') FROM cue_cuentas)"
+                    " AND cuit NOT IN (SELECT cuit FROM cue_cuit)")
     R('C5', 'todo CUIT que compró tiene su cuenta', 'PASA' if not falta else 'FALLA', f'{falta} CUIT sin cuenta')
     # cuentas 0.2: la unificada hereda «trabajar» de su principal (puede valer 1); el resto tiene que coincidir con el estado
     mal = uno(db, "SELECT count(*) FROM cue_cuentas WHERE estado <> 'unificada' AND (estado = 'trabajar') <> (trabajar = 1)")
