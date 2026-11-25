@@ -1,0 +1,5 @@
+{"numero": "NM61", "fecha": "25/11/2026", "cliente": "CEVIC", "cuit": "30-57186827-6",
+ "atencion": "Francisco", "condIva": "Responsable Inscripto", "condPago": "Contado (transferencia)",
+ "items": [{"articulo": "ONT GPON FiberHome HG6543D", "sub": "Cód. 1114 · FiberHome · WiFi 5 doble banda · 4 GE · 1 POTS", "cant": 40, "precio": 25, "iva": 10.5}],
+ "observaciones": ["Despacho por Transporte Guillermina (Av. Gral. Tomás de Iriarte 2775, CABA). Destino: Victorica, La Pampa.", "Los precios no incluyen flete ni seguro.", "Stock sujeto a confirmación al momento de la orden de compra."],
+ "tc": 1620, "tc_fuente": "BNA billete venta, 25/11"}
