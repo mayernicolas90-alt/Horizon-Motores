@@ -3,6 +3,9 @@
  "version": "V9 propuesta",
  "base": "PM config/motorV8 versión 4 (2026-10-29)",
  "archivos": {
+  "diseno/cotizacion/LEEME.md": "a535fde4b2ec",
+  "diseno/cotizacion/cotizacion_nm.py": "3dc7e232e894",
+  "diseno/cotizacion/ejemplo_nm61.json": "d7cb9cdf831a",
   "diseno/fichas/an6000-7_comp.json": "fbfcc3b93b53",
   "diseno/fichas/ont-hg6145f3_v9.json": "5d52017f1916",
   "diseno/motor/banco_esperado.json": "163dcbe8bbee",
