@@ -157,6 +157,12 @@
    "huella": "e230456783b5",
    "version": "1.0",
    "test": []
+  },
+  "ventas.py": {
+   "origen": "nuevo 26/11 (hacelo de Nicolás: ventas = CRM)",
+   "huella": "bab7b8226d80",
+   "version": "1.0",
+   "test": []
   }
  }
 }
