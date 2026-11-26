@@ -163,6 +163,14 @@
    "huella": "bab7b8226d80",
    "version": "1.0",
    "test": []
+  },
+  "equivalencias.py": {
+   "origen": "nuevo 26/11 (nombre comercial -> código HIVE)",
+   "huella": "77800beb3d06",
+   "version": "1.0",
+   "test": [
+    "--autotest"
+   ]
   }
  }
 }
