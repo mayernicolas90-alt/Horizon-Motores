@@ -2,6 +2,9 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.17.0 (26/11, hacelo de Nicolás · control de contrato al arrancar): L10 frena la apertura (FALLA, arriba de todo) si el
+        loki_sql en uso no es el de la tabla scripts o el del repo, o si los motores corren desde una rama que no es la
+        principal (el 26/11 corrían desde loki/pasos-3-5-auditoria sin fusionar). Avisa si el repo tiene cambios sin subir.
 1.16.1 (26/11, hacelo de Nicolás): une la 1.16.0 (pasos 3 y 4 de la auditoría del 25/11: la apertura muestra la portada
         por_dia como único ranking y toma las versiones de dc_motores) con la 1.15.1 de abajo. Sin cambios de lógica propios.
 1.15.1 (26/11, hacelo de Nicolás: «la apertura debería ver el CRM actualizado»): FUENTES CRM y el «Respaldo viejo» de loki.py
@@ -122,7 +125,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.16.1"
+VERSION = "1.17.0"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -761,6 +764,45 @@ def buscar_dc():
     return None
 
 
+RAMA_PRINCIPAL = 'ccr-9ba1fa0e-sxlh5w'
+
+
+def _git(repo, *args):
+    p = subprocess.run(['git', '-C', repo] + list(args), capture_output=True, text=True, timeout=30)
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr or p.stdout).strip()[:120])
+    return p.stdout.strip()
+
+
+def contrato(version_base, repo, git=_git, version=None):
+    """1.17.0 L10 (control de contrato al arrancar, hacelo de Nicolás 26/11): lo que corre tiene que ser lo sellado.
+    FALLA (frena el ranking y va arriba de todo): loki_sql en uso ≠ el de la tabla scripts o ≠ el del repo; los motores
+    (repo Horizon-Motores) en una rama que no es la principal. AVISO: cambios sin subir en loki/ o controles/ del repo.
+    version_base = versión de loki_sql.py en la tabla scripts (None si no está); repo = carpeta del repo (None si no hay)."""
+    v, falla, aviso = version or VERSION, [], []
+    if version_base and version_base != v:
+        falla.append(f'L10 loki_sql en uso {v} y en la base (scripts) {version_base}: instalar la misma versión en los dos')
+    if not repo:
+        aviso.append('L10 sin repo de motores (LOKI_MOTORES o C:\\Horizon\\Horizon-Motores): no se controló la rama')
+        return falla, aviso
+    try:
+        m = re.search(r'^VERSION = "([^"]+)"', open(os.path.join(repo, 'loki', 'loki_sql.py'), encoding='utf-8').read(), re.M)
+        if m and m.group(1) != v:
+            falla.append(f'L10 loki_sql en uso {v} y en el repo {m.group(1)}: copiar el del repo a .loki (o fusionar) antes de seguir')
+    except OSError:
+        aviso.append('L10 el repo no tiene loki/loki_sql.py')
+    try:
+        rama = git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')
+        if rama != RAMA_PRINCIPAL:
+            falla.append(f'L10 los motores corren desde la rama «{rama}», no desde la principal: pasar el repo a {RAMA_PRINCIPAL}')
+        sucio = git(repo, 'status', '--porcelain', '--', 'loki', 'controles')
+        if sucio:
+            aviso.append(f'L10 cambios sin subir en el repo ({len(sucio.splitlines())} archivos en loki/ o controles/)')
+    except Exception as e:  # noqa: BLE001  sin git no se frena, se avisa
+        aviso.append(f'L10 no se pudo leer la rama del repo ({str(e)[:80]})')
+    return falla, aviso
+
+
 def cadena(disparo, motivo):
     """DEC-1124b: después de una carga corre los motores del disparo con dc.py (que corta la cadena si un motor o su auditor
     falla). Devuelve 0 PASA, 1 FALLA, 2 no corrió. Nunca deshace la carga: solo informa."""
@@ -1033,6 +1075,14 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False, origen
     except Exception as e:  # noqa: BLE001  la apertura no se cae por esto
         nc, ncrm, extra_aviso = None, None, [f'L8 clientes/calidad no corrió ({str(e)[:80]})']
     clase, falla, aviso = controles(db, cg, hoy)
+    if not os.environ.get('LOKI_SQL_LOCAL'):   # 1.17.0 L10: en la base de prueba no hay scripts ni repo que controlar
+        try:
+            vb = q(db, "SELECT version FROM scripts WHERE nombre='loki_sql.py'")
+            dc = buscar_dc()
+            f10, a10 = contrato(vb[0]['version'] if vb else None, os.path.dirname(os.path.dirname(dc)) if dc else None)
+        except Exception as e:  # noqa: BLE001
+            f10, a10 = [], [f'L10 el control de contrato no corrió ({str(e)[:80]})']
+        falla, aviso = f10 + falla, a10 + aviso
     aviso = aviso + extra_aviso
     falla = f_baj + falla
     clase = 'NO_LISTO_DATOS' if falla else clase
@@ -1643,6 +1693,25 @@ def autotest():
         no_hoy = lambda a: any(x.startswith('L4 crm:cotizaciones') and 'no hoy' in x for x in a)   # copia del CRM del 18/11
         chk('1.15.1: CRM de ayer avisa; el de hoy no', no_hoy(controles(db, cg, date(2026, 11, 19))[2])
             and not no_hoy(controles(db, cg, date(2026, 11, 18))[2]))
+        # 1.17.0 L10: repo de mentira con su loki_sql.py; git simulado
+        rp = os.path.join(base, 'REPO'); os.makedirs(os.path.join(rp, 'loki'), exist_ok=True)
+        w(os.path.join(rp, 'loki', 'loki_sql.py'), f'VERSION = "{VERSION}"\n')
+        g = lambda rama, sucio='': (lambda repo, *a: rama if a[0] == 'rev-parse' else sucio)
+        f0, a0 = contrato(VERSION, rp, g(RAMA_PRINCIPAL))
+        chk('1.17.0 L10: todo igual y en la principal, sin falla ni aviso', not f0 and not a0)
+        f1, _ = contrato('1.0.0', rp, g(RAMA_PRINCIPAL))
+        chk('1.17.0 L10: versión distinta en la base frena', any('en la base' in x for x in f1))
+        f2, _ = contrato(VERSION, rp, g('loki/pasos-3-5-auditoria'))
+        chk('1.17.0 L10: motores en otra rama frena', any('desde la rama' in x for x in f2))
+        w(os.path.join(rp, 'loki', 'loki_sql.py'), 'VERSION = "9.9.9"\n')
+        f3, _ = contrato(VERSION, rp, g(RAMA_PRINCIPAL))
+        chk('1.17.0 L10: versión distinta en el repo frena', any('en el repo 9.9.9' in x for x in f3))
+        f4, a4 = contrato('9.9.9', rp, g(RAMA_PRINCIPAL, ' M loki/x.py'), version='9.9.9')
+        chk('1.17.0 L10: cambios sin subir avisan, no frenan', not f4 and any('sin subir' in x for x in a4))
+        def sin_git(repo, *a):
+            raise RuntimeError('git no está')
+        f5, a5 = contrato(VERSION, None, sin_git)
+        chk('1.17.0 L10: sin repo avisa, no frena', not f5 and any('sin repo' in x for x in a5))
         db.run([("DELETE FROM ventas WHERE n=2", [])])
         clase, fa, av = controles(db, cg, hoy)
         chk('fila borrada: NO_LISTO (L3)', clase == 'NO_LISTO_DATOS' and any(x.startswith('L3 R10') for x in fa))
