@@ -97,6 +97,19 @@
    "nota": "Paso 4 del datacenter (hacelo de Nicolás): loki_sql 1.13.0 exige --origen 5SPm en cargar-crm y abrir --crm; L9 al abrir."
   },
   {
+   "id": "C09",
+   "error": "Las ventas de un mes cerrado podían cambiar sin que nadie lo viera (26/11: Swissnet 0000-00023 y Bertone FA 1699 contaban como de Nicolás)",
+   "fecha": "2026-11-26",
+   "tipo": "caso",
+   "archivo": "controles/c09_ventas_cerradas.py",
+   "corre": [
+    "ci",
+    "diario"
+   ],
+   "leccion": "P21",
+   "nota": "Hacelo de Nicolás 26/11: ventas = CRM (el tablero vivo), nunca Finnegans. Octubre 2026 fijo en USD 73.964,21 sin IVA (loki/ventas.py)."
+  },
+  {
    "id": "G01",
    "error": "Se subió código de Loki al repositorio de la otra cuenta, o firmado por la otra cuenta",
    "fecha": "2026-11-21",
