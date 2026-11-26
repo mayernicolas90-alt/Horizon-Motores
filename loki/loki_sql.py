@@ -2,6 +2,8 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.16.1 (26/11, hacelo de Nicolás): une la 1.16.0 (pasos 3 y 4 de la auditoría del 25/11: la apertura muestra la portada
+        por_dia como único ranking y toma las versiones de dc_motores) con la 1.15.1 de abajo. Sin cambios de lógica propios.
 1.15.1 (26/11, hacelo de Nicolás: «la apertura debería ver el CRM actualizado»): FUENTES CRM y el «Respaldo viejo» de loki.py
         toman la fecha de las colecciones del arranque (oportunidades, cotizaciones, muestras), no de config/lista/intel (antes
         decía «CRM 24/11» aunque las cotizaciones fueran de hoy). L4 avisa si la copia del CRM no es de HOY (antes, recién a
@@ -120,7 +122,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.15.1"
+VERSION = "1.16.1"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -964,6 +966,16 @@ def doc(db, i, sec=None):
     return seccion(r[0]['texto'], sec) if sec else r[0]['texto']
 
 
+def portada_a_top(filas, hoy_s):
+    """1.16.0 (paso 3 de la auditoría 25/11, regla N01): un solo ranking. La apertura deja de mostrar el top 5 que arma loki.py
+    y muestra los 10 de la portada (motor Portada, tabla por_dia), con el mismo formato de ítem que lee memoria_check."""
+    top = [dict(cuenta=f.get('empresa'), usd=round(f.get('valor_en_juego') or 0), por_que=f.get('motivo') or '',
+                accion=f.get('accion') or '', id=f.get('crm_id'), tipo=f.get('tipo'), s=f.get('s'), puesto=f.get('puesto'))
+           for f in sorted(filas, key=lambda f: f.get('puesto') or 99)]
+    calc = max((str(f.get('calculado') or '') for f in filas), default='')
+    return dict(top5=top, fuente_top='portada', portada_calculado=calc or None, hoy=hoy_s)
+
+
 def apertura(datos, clase, falla, aviso):
     j = lambda n: json.load(open(os.path.join(datos, n), encoding='utf-8')) if os.path.exists(os.path.join(datos, n)) else None
     a, u = j('abrir.json'), j('urgentes.json')
@@ -982,12 +994,15 @@ def apertura(datos, clase, falla, aviso):
     if clase == 'NO_LISTO_DATOS':
         out.append('R-DETENER: sin ranking ni top 5; solo vencidas y qué falta.')
     elif u:
-        out.append('TOP 5' + (' (arranque con aviso de formato)' if clase == 'AVISO_FORMATO' else '') + ':')
-        for k, x in enumerate((u.get('top5') or [])[:5], 1):
-            ojo = x.get('ojo')
-            ojo = ' / '.join(map(str, ojo)) if isinstance(ojo, list) else (ojo or '')
-            out.append(f"{k}. {str(x.get('cuenta'))[:30]} · USD {x.get('usd')} · {str(x.get('por_que'))[:80]} · hoy: {str(x.get('accion'))[:90]}"
-                       + (f' · ojo: {ojo[:90]}' if ojo else ''))
+        if u.get('fuente_top') != 'portada':   # 1.16.0: loki.py ya no arma ranking propio (N01)
+            out.append('PORTADA sin datos (tabla por_dia vacía o sin leer): correr `loki_sql.py cadena`; no se muestra ranking propio')
+        else:
+            pc, hy = u.get('portada_calculado'), u.get('hoy')
+            out.append(f"PORTADA · motor Portada, calculada {pc or '?'}" + ('' if pc == hy else ' · NO ES DE HOY: correr `loki_sql.py cadena`')
+                       + (' (arranque con aviso de formato)' if clase == 'AVISO_FORMATO' else '') + ':')
+            for x in (u.get('top5') or [])[:10]:
+                out.append(f"{x.get('puesto')}. {str(x.get('cuenta'))[:30]} · {x.get('tipo') or '-'} · {x.get('s')} · USD {x.get('usd')} · "
+                           f"{str(x.get('por_que'))[:70]} · hoy: {str(x.get('accion'))[:90]}")
         co, cf = u.get('cortas') or [], u.get('conflictos') or []
         out.append(f'CORTAS ({len(co)}): ' + (' · '.join(f"{str(x.get('cuenta'))[:22]} USD {x.get('usd')}" for x in co[:6]) or '-'))
         pv = u.get('posventa') or []
@@ -1029,6 +1044,19 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False, origen
             falla.append(f'loki.py {cmd}: exit {p.returncode} {p.stderr.strip()[-160:]}')
             clase = 'NO_LISTO_DATOS'
         open(os.path.join(datos, salida), 'w', encoding='utf-8').write(p.stdout)
+    try:   # 1.16.0: el top de la apertura es la portada (por_dia); el de loki.py se descarta (N01, un solo ranking)
+        pu = os.path.join(datos, 'urgentes.json')
+        u = json.load(open(pu, encoding='utf-8')) if os.path.exists(pu) else {}
+        u.pop('top5', None); u.pop('siguen', None)
+        try:
+            filas = q(db, 'SELECT * FROM por_dia ORDER BY puesto')
+        except Exception:  # noqa: BLE001  sin tabla por_dia: la apertura lo dice y no muestra ranking
+            filas = []
+        if filas:
+            u.update(portada_a_top(filas, hoy_s))
+        json.dump(u, open(pu, 'w', encoding='utf-8'), ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        aviso.append(f'L10 portada no se leyó ({str(e)[:80]})')
     try:   # 1.8.0: continuidad, bitácora y despacho en un viaje (antes 4)
         con, b, ult, gsd = qs(db, ["SELECT importante FROM continuidad WHERE id='actual'",
                                    "SELECT COUNT(*) n, SUM(estado='abierto') a FROM bitacora",
@@ -1354,7 +1382,12 @@ def conocimiento(db):
         "SELECT id, titulo, aplica FROM k_regla WHERE estado='vigente' AND dura=0 ORDER BY id",
         "SELECT id, tema, texto FROM k_preferencia ORDER BY tema, id",
         "SELECT id, fecha, que FROM k_decision WHERE estado='vigente' ORDER BY fecha DESC, id",
-        "SELECT nombre, pestana, que_hace, estado FROM k_motor ORDER BY id"])
+        "SELECT id, nombre, pestana, que_hace, estado, version FROM k_motor ORDER BY id"])
+    try:   # 1.16.0 · paso 4: un solo registro. k_motor es el catálogo; la versión de los motores del datacenter sale de dc_motores
+        dcm = {r['id']: r['version'] for r in q(db, 'SELECT id, version FROM dc_motores')}   # (la escribe dc.py desde cada contrato)
+    except Exception:  # noqa: BLE001  base sin datacenter
+        dcm = {}
+    mo = registro_motores(mo, dcm)
     out = [f'CONOCIMIENTO (tablas k_*) · reglas duras {len(du)} · otras vigentes {len(ot)} · preferencias {len(pr)} · decisiones {len(de)}',
            '## Reglas duras (no se negocian)']
     out += [f"- {r['id']} · {r['titulo']}: {r['texto']}" for r in du]
@@ -1368,8 +1401,27 @@ def conocimiento(db):
         out.append(f"- {r['texto']}")
     out.append(f'## Últimas decisiones (6 de {len(de)}; todas: sql k_decision)')
     out += [f"- {r['id']} {str(r['fecha'])[8:10]}/{str(r['fecha'])[5:7]}: {r['que'][:120]}" for r in de[:6]]
-    out.append('## Motores → pestaña: ' + ' · '.join(f"{r['nombre']} → {r['pestana']} ({r['estado']})" for r in mo))
+    out.append('## Motores → pestaña: ' + ' · '.join(f"{r['nombre']} {r['version'] or ''}".rstrip() + f" → {r['pestana']} ({r['estado']})"
+                                                     for r in mo if r.get('id')))
+    sin = [r['falta'] for r in mo if r.get('falta')]
+    if sin:
+        out.append('AVISO registro de motores: en dc_motores sin ficha en k_motor: ' + ', '.join(sin) + ' (sumarla con hacelo)')
     return '\n'.join(out)
+
+
+def registro_motores(km, dcm):
+    """1.16.0 (paso 4 de la auditoría 25/11): une k_motor (catálogo, pestaña, estado) con dc_motores (versión real que deja dc.py
+    del contrato de cada motor). La versión de loki_sql es la de este archivo. Lo que está en dc_motores y no en k_motor se avisa."""
+    out = []
+    for r in km:
+        r = dict(r)
+        v = VERSION if r['id'] == 'loki_sql' else dcm.get(r['id'])
+        if v:
+            r['version'] = re.sub(r'^\S+\s+(?=\d)', '', str(v)).split(' · ')[0]   # 'recompra 4.1 · 2026-11-24' → '4.1'
+        out.append(r)
+    ids = {r['id'] for r in km}
+    out += [dict(falta=i) for i in sorted(dcm) if i not in ids]
+    return out
 
 
 def regla(db, i):
@@ -1771,6 +1823,34 @@ def autotest():
         chk('1.14.0 bajar trae cuentas.py o avisa L2', os.path.exists(f'{base}/B/SCRIPTS/cuentas.py') or any('cuentas.py' in x for x in fb))
         chk('1.14.0 sin rec_sku la recompra queda la 3.1', rec41(db, f'{base}/B/DATOS') is False
             or json.load(open(f'{base}/B/DATOS/recompra_meta.json', encoding='utf-8')).get('version', '').startswith('recompra 4.1'))
+        # 1.16.0 · paso 3: un solo ranking (la apertura muestra la portada, no el top 5 de loki.py)
+        pd = [dict(puesto=2, crm_id='b', empresa='Beta', tipo='rapida', s=50, valor_en_juego=0, motivo='Muestra', accion='Preguntar', calculado='2026-11-25'),
+              dict(puesto=1, crm_id='a', empresa='Alfa', tipo='consultiva', s=70, valor_en_juego=2897.31, motivo='Cotización enviada', accion='Despachar',
+                   calculado='2026-11-25')]
+        ut = portada_a_top(pd, '2026-11-25')
+        chk('1.16.0 portada_a_top ordena por puesto y lleva id y acción', [x['cuenta'] for x in ut['top5']] == ['Alfa', 'Beta']
+            and ut['top5'][0]['id'] == 'a' and ut['top5'][0]['usd'] == 2897 and ut['top5'][0]['accion'] == 'Despachar')
+        dd = f'{base}/AP'
+        os.makedirs(dd, exist_ok=True)
+        json.dump(dict(ut, cortas=[], conflictos=[], posventa=[]), open(f'{dd}/urgentes.json', 'w', encoding='utf-8'))
+        ta = apertura(dd, 'LISTO', [], [])
+        chk('1.16.0 apertura muestra PORTADA de hoy y no TOP 5', 'PORTADA · motor Portada, calculada 2026-11-25:' in ta
+            and 'TOP 5' not in ta and '1. Alfa' in ta and 'NO ES DE HOY' not in ta)
+        json.dump(dict(portada_a_top(pd, '2026-11-26'), cortas=[]), open(f'{dd}/urgentes.json', 'w', encoding='utf-8'))
+        chk('1.16.0 portada vieja avisa NO ES DE HOY', 'NO ES DE HOY' in apertura(dd, 'LISTO', [], []))
+        json.dump(dict(top5=[dict(cuenta='Propio', usd=1)], cortas=[]), open(f'{dd}/urgentes.json', 'w', encoding='utf-8'))
+        ta = apertura(dd, 'LISTO', [], [])
+        chk('1.16.0 sin portada no muestra ranking propio', 'PORTADA sin datos' in ta and 'Propio' not in ta)
+        chk('1.16.0 R-DETENER sigue sin ranking', 'PORTADA' not in apertura(dd, 'NO_LISTO_DATOS', ['x'], []))
+        # 1.16.0 · paso 4: un solo registro de motores
+        km = [dict(id='loki_sql', nombre='loki_sql', pestana='(base)', estado='en GitHub', version='1.8.0'),
+              dict(id='recompra', nombre='Recompra', pestana='(x)', estado='en GitHub', version='v3.1'),
+              dict(id='sales_engine', nombre='Sales Engine', pestana='Sales', estado='sellado', version='4.7')]
+        rm = registro_motores(km, {'recompra': 'recompra 4.1 · 2026-11-24', 'portada': 'portada 0.1 · 2026-11-24'})
+        v = {r.get('id'): r.get('version') for r in rm}
+        chk('1.16.0 registro: versión de dc_motores y de este archivo, el resto queda', v['loki_sql'] == VERSION and v['recompra'] == '4.1'
+            and v['sales_engine'] == '4.7')
+        chk('1.16.0 registro: motor del datacenter sin ficha en k_motor se avisa', [r['falta'] for r in rm if r.get('falta')] == ['portada'])
         db.close()
     finally:
         os.environ.pop('LOKI_SQL_LOCAL', None)
