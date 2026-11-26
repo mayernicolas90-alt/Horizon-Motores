@@ -145,6 +145,18 @@
    "huella": "485906f64fa4",
    "version": "0.1",
    "test": []
+  },
+  "volcar.py": {
+   "origen": "respaldo de la nube 26/11 (hacelo de Nicolás)",
+   "huella": "44ff5da297d9",
+   "version": "1.0",
+   "test": []
+  },
+  "partir_respaldo.py": {
+   "origen": "respaldo de la nube 26/11 (hacelo de Nicolás)",
+   "huella": "e230456783b5",
+   "version": "1.0",
+   "test": []
   }
  }
 }
