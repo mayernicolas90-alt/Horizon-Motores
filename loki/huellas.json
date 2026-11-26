@@ -4,8 +4,8 @@
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "bfe310cdb4aa",
-   "version": "1.15.0",
+   "huella": "b3d194b07f94",
+   "version": "1.15.1",
    "test": [
     "--autotest"
    ]
