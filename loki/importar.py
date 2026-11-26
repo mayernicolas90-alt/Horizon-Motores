@@ -36,7 +36,12 @@ Uso:
 """
 import argparse, collections, csv, datetime as D, hashlib, json, os, re, sqlite3, sys, unicodedata
 
-VERSION = 'importar 0.5 · 2026-11-24'   # 0.5 = 0.3 de la puerta de entrada (cuentas ajenas del CRM, FALLA si falta >2 %) + 0.4 del datacenter
+VERSION = 'importar 0.6 · 2026-11-26'   # 0.5 = 0.3 de la puerta de entrada (cuentas ajenas del CRM, FALLA si falta >2 %) + 0.4 del datacenter
+# 0.6 (26/11, hacelo de Nicolás): facturas que fueron muestras anuladas sin NC en el reporte no son compra (clase 'muestra').
+# Clave = (letra, punto de venta, número) del comprobante de la factura. Agregar una solo con el dato de Nicolás.
+MUESTRAS_ANULADAS = {
+    ('A', 5, 1316): 'La Rioja Telecomunicaciones SAPEM · OLT AN6000-2 del 20/12/2024: muestra anulada (L-186 del PM, 24/11)',
+}
 EMPRESA = 'HORIZON TRADING S.A.'
 TOL_DESCUENTO = 0.05   # pedido vs. factura con descuento contado (Sampacho 19/11: 1.256 → 1.218,32)
 TABLAS = ('fuentes', 'comprobantes', 'renglones', 'vinculos_nc', 'revisar', 'faltan_renglones', 'pedidos')
@@ -296,6 +301,8 @@ def main(argv=None):
             l['producto_n'] = norm(l['producto'])
             if c['tipo'] == 'DC':
                 l['clase'] = 'dif_cambio'
+            elif c['tipo'] == 'FA' and nro_comp(c['comprobante']) in MUESTRAS_ANULADAS:   # 0.6
+                l['clase'] = 'muestra'
             elif ANTICIPO.search(l['producto']):
                 l['clase'] = 'anticipo'
             elif NOPROD.search(l['producto']):
@@ -630,6 +637,9 @@ def autotest():
         # 6 NC de producto sin factura posible: a revisar
         ['14', '2026-06-01', NC, 'A-00005-00000024', 'Cliente V', '30-55555555-5', '', '', 'Ont C', '-5', '', '', '', 'Dólares', H],
     ]
+    # 8 (0.6) muestra anulada sin NC en el reporte (caso La Rioja, FA 1316): no es compra; la factura vecina sí
+    ren.append(['16', '2024-12-20', FA, 'A-00005-00001316', 'Cliente R', '30-77777777-7', '', '', 'OLT AN6000-2', '1', 'FH', 'FTTH', 'OLT', 'Dólares', H])
+    ren.append(['17', '2024-12-20', FA, 'A-00005-00001317', 'Cliente R', '30-77777777-7', '', '', 'OLT AN6000-2', '1', 'FH', 'FTTH', 'OLT', 'Dólares', H])
     # 7 (0.3) Swissnet es de Nicolás: la lista fija de la 0.2 la marcaba como otro vendedor
     ren.append(['15', '2026-10-01', FA, 'A-00005-00001050', 'Swissnet SRL', '30-66666666-6', '', '', 'Drop', '1000', 'FH', 'FIBRA OPTICA', 'DROP', 'Dólares', H])
     r1 = esc('ren.csv', RC, ren)
@@ -676,6 +686,8 @@ def autotest():
         ('0.3 cuenta fuera por CUIT desde restricciones', db.execute("SELECT otro_vendedor FROM revisar WHERE tid='14'").fetchone()[0] == 1),
         ('0.3 cuentasDeNicolas manda sobre noProspectar', ajena('9') == 0),
         ('0.3 reporte incompleto (1 de 3 sin renglones) da FALLA', bool(res1.get('_falla'))),
+        ('0.6 muestra anulada (FA 1316) no es compra; la FA 1317 sí', firme('16') == 0 and firme('17') == 1
+         and db.execute("SELECT clase FROM renglones WHERE tid='16'").fetchone()[0] == 'muestra'),
     ]
     db.close()
     base2 = os.path.join(d, 'b2.sqlite')
