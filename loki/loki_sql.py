@@ -2,6 +2,12 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.16.1 (26/11, hacelo de Nicolás): une la 1.16.0 (pasos 3 y 4 de la auditoría del 25/11: la apertura muestra la portada
+        por_dia como único ranking y toma las versiones de dc_motores) con la 1.15.1 de abajo. Sin cambios de lógica propios.
+1.15.1 (26/11, hacelo de Nicolás: «la apertura debería ver el CRM actualizado»): FUENTES CRM y el «Respaldo viejo» de loki.py
+        toman la fecha de las colecciones del arranque (oportunidades, cotizaciones, muestras), no de config/lista/intel (antes
+        decía «CRM 24/11» aunque las cotizaciones fueran de hoy). L4 avisa si la copia del CRM no es de HOY (antes, recién a
+        los 2 días: el 26/11 la apertura usó la copia del 25/11 y dio NM59 abierta estando ganada).
 1.15.0 (25/11, paso 2 de la auditoría, hacelo de Nicolás · DEC-1124b): después de cargar-reporte y cargar-crm (y de abrir con
         --crm) corre la cadena de motores con dc.py (Finnegans: todos; CRM: los del disparo loki) y muestra una línea CADENA con
         PASA/FALLA. dc.py ya corta la cadena y el Publicador no publica si el auditor da FALLA. --sin-cadena la saltea; sin dc.py
@@ -116,7 +122,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.16.0"
+VERSION = "1.16.1"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -839,7 +845,7 @@ def bajar(db, raiz):
     colecciones, corte_crm = {}, None
     for r in r_crm:
         colecciones.setdefault(r['coleccion'], {})[r['id']] = json.loads(r['data'])
-    cortes = [c['corte'] for k, c in cg.items() if k.startswith('crm:') and c['corte']]
+    cortes = [c['corte'] for k, c in cg.items() if k[4:] in CRM_ARRANQUE and k.startswith('crm:') and c['corte']]  # 1.15.1
     corte_crm = min(cortes) if cortes else None
     resp = dict(format='horizon-crm', version=3, exportedAt=f'{corte_crm}T00:00:00.000Z', origen='loki_sql', collections=colecciones)
     json.dump(resp, open(os.path.join(datos, 'respaldo.json'), 'w', encoding='utf-8'), ensure_ascii=False)
@@ -885,8 +891,8 @@ def controles(db, cg, hoy):
             e = edad(cg[f]['corte'])
             (falla if e > 14 else aviso if e > 3 else []).append(f'L4 {f} corte {str(cg[f]["corte"])[:10]} ({e} días)')
     for f in crm:
-        if f[4:] in CRM_ARRANQUE and edad(cg[f]['corte']) > 1:
-            aviso.append(f'L4 {f} copiado el {cg[f]["corte"]}: copiar el CRM de nuevo')
+        if f[4:] in CRM_ARRANQUE and edad(cg[f]['corte']) >= 1:   # 1.15.1: la apertura ve el CRM de hoy
+            aviso.append(f'L4 {f} copiado el {str(cg[f]["corte"])[:10]}, no hoy: bajar el CRM (crm-desde) y abrir con --crm')
         comp = json.loads(cg[f].get('meta') or '{}').get('completa') if f[4:] in CRM_ARRANQUE else 'x'
         if f[4:] in CRM_ARRANQUE and (not comp or edad(comp) > 7):
             aviso.append(f'L4 {f}: copia completa de más de 7 días (próximo arranque: COMPLETA)')
@@ -1634,6 +1640,9 @@ def autotest():
         cg = {c['fuente']: c for c in q(db, 'SELECT * FROM cargas')}
         clase, fa, av = controles(db, cg, hoy)
         chk('sano: LISTO con aviso de frescura', clase == 'LISTO' and any(x.startswith('L4 R10') for x in av))
+        no_hoy = lambda a: any(x.startswith('L4 crm:cotizaciones') and 'no hoy' in x for x in a)   # copia del CRM del 18/11
+        chk('1.15.1: CRM de ayer avisa; el de hoy no', no_hoy(controles(db, cg, date(2026, 11, 19))[2])
+            and not no_hoy(controles(db, cg, date(2026, 11, 18))[2]))
         db.run([("DELETE FROM ventas WHERE n=2", [])])
         clase, fa, av = controles(db, cg, hoy)
         chk('fila borrada: NO_LISTO (L3)', clase == 'NO_LISTO_DATOS' and any(x.startswith('L3 R10') for x in fa))
@@ -1652,7 +1661,8 @@ def autotest():
         chk('script alterado: L2', any('L2 script loki.py' in x for x in fb))
         chk('bajar reproduce R10.csv exacto', sha(open(f'{base}/RAIZ/DATOS/R10.csv', encoding='utf-8').read()) == sha(csv10))
         r = json.load(open(f'{base}/RAIZ/DATOS/respaldo.json', encoding='utf-8'))
-        chk('respaldo.json formato v3', r['collections']['cotizaciones']['c1']['numero'] == 'NM1' and r['exportedAt'].startswith('2026-11-17'))
+        # 1.15.1: la fecha es la de la copia de las colecciones del arranque (incremental del 18/11), no la de otras colecciones
+        chk('respaldo.json formato v3', r['collections']['cotizaciones']['c1']['numero'] == 'NM1' and r['exportedAt'].startswith('2026-11-18'))
         try:
             main(['sql', 'DELETE FROM ventas']); chk('sql solo lectura', False)
         except SystemExit as e:
