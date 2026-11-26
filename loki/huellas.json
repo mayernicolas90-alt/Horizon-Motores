@@ -70,8 +70,8 @@
   },
   "importar.py": {
    "origen": "24/11: 0.5 = 0.3 de la puerta de entrada (cuentas ajenas desde el CRM, FALLA si falta >2 % contra la cabecera) + 0.4 del datacenter (sinónimos, correr desde Turso, NC con referencia primero, cantidad exacta)",
-   "huella": "1671581c7f54",
-   "version": "0.5",
+   "huella": "b2353aaa418b",
+   "version": "0.6",
    "test": [
     "--autotest"
    ]
