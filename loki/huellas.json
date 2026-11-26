@@ -86,8 +86,8 @@
   },
   "cuentas.py": {
    "origen": "24/11: 0.2 = la ficha unificada hereda «trabajar» de la principal (acuerdo con el PM, PM-j punto 4)",
-   "huella": "9785fad29085",
-   "version": "0.2",
+   "huella": "552c9fc455a1",
+   "version": "0.4",
    "test": [
     "--autotest"
    ]
@@ -118,7 +118,7 @@
   },
   "auditor_dc.py": {
    "origen": "24/11: 0.6 = C6 acepta que la ficha unificada herede «trabajar» (cuentas 0.2)",
-   "huella": "cfd66770d024",
+   "huella": "304d2ceb1496",
    "version": "0.6",
    "test": [
     "--autotest"
@@ -144,6 +144,18 @@
    "origen": "%USERPROFILE%/.loki/guardar_token_pm.py",
    "huella": "485906f64fa4",
    "version": "0.1",
+   "test": []
+  },
+  "volcar.py": {
+   "origen": "respaldo de la nube 26/11 (hacelo de Nicolás)",
+   "huella": "44ff5da297d9",
+   "version": "1.0",
+   "test": []
+  },
+  "partir_respaldo.py": {
+   "origen": "respaldo de la nube 26/11 (hacelo de Nicolás)",
+   "huella": "e230456783b5",
+   "version": "1.0",
    "test": []
   }
  }
