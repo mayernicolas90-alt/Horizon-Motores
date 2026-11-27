@@ -5,7 +5,7 @@ description: "Usar cuando Nicolás escriba \"Loki\" al empezar un chat: arranque
 
 # Loki maestro · arranque con la base propia (Turso horizon-nicom90)
 
-Versión 3.0 · 26/11/2026. Reemplaza el arranque por `horizon-db` / `apertura_loki` y por `correr_dia.py` + colección `datacenter`: **no usar ninguno de los dos**. `horizon-db` corre desde `Motores-Horizon` sobre `C:\HorizonDB\horizon.db`, que es de la otra cuenta (nicolasmayer90-ship-it). Si esta skill y el CLAUDE.md de Nicolás dicen cosas distintas, manda el CLAUDE.md.
+Versión 3.1 · 27/11/2026 (apertura corta). Antes: 3.0 · 26/11/2026. Reemplaza el arranque por `horizon-db` / `apertura_loki` y por `correr_dia.py` + colección `datacenter`: **no usar ninguno de los dos**. `horizon-db` corre desde `Motores-Horizon` sobre `C:\HorizonDB\horizon.db`, que es de la otra cuenta (nicolasmayer90-ship-it). Si esta skill y el CLAUDE.md de Nicolás dicen cosas distintas, manda el CLAUDE.md.
 
 ## Dónde vive cada cosa (solo cuenta mayernicolas90-alt)
 - Carpeta de trabajo: `C:\Loki`. Scripts: `%USERPROFILE%\.loki`. Código: `C:\Horizon\Horizon-Motores` (carpeta `loki/`).
@@ -21,14 +21,16 @@ Versión 3.0 · 26/11/2026. Reemplaza el arranque por `horizon-db` / `apertura_l
    - Si dice `DESDE X`: ArtifactData `query` sobre el CRM 5SPm de `cotizaciones`, `oportunidades` y `muestras` con `actualizado >= X` (limit 1000, `out_dir` a una carpeta nueva del scratchpad).
    - Si dice `COMPLETA`: `list` entero de las tres colecciones a esa carpeta.
    - Cargar ArtifactData antes con ToolSearch `select:ArtifactData`. Leer siempre a disco (`out_dir`); nunca volcar fichas al chat.
-2. `loki_sql.py abrir C:\Loki AAAA-MM-DD --crm <esa carpeta> --origen 5SPm4UZTgiF5JXx7GKTybq [--incremental si fue DESDE] --reglas`.
+2. `loki_sql.py abrir C:\Loki AAAA-MM-DD --crm <esa carpeta> --origen 5SPm4UZTgiF5JXx7GKTybq [--incremental si fue DESDE]` (**sin `--reglas`**: las reglas se consultan cuando hacen falta con `loki_sql.py regla ID` o `reglas`).
    La carpeta y la fecha de hoy son obligatorias. **Nunca abrir sin `--crm`**: sin él se usa la copia vieja (26/11 salió NM59 abierta estando ganada).
    Si el CRM no se puede leer: plan B con `partir_respaldo.py` sobre el último `Horizon-CRM-respaldo-*.json` y abrir con esa carpeta (copia completa).
-3. Leer la salida entera: controles L1-L10, CADENA, portada, continuidad, reglas vigentes.
+   De esta salida se leen **solo los controles**: la línea `ARRANQUE`, `CONTROL`, `CADENA` y cualquier `FALLA` o `AVISO`.
    - **FALLA** (sobre todo L10: el script no es el del repo o los motores corren desde otra rama): decirlo primero y no seguir con lo que dependa de eso.
    - **AVISO L4** de reportes viejos: decir qué reporte de Finnegans falta, con su código y nombre (`loki_sql.py reportes`).
-   - Lo ya decidido está en reglas vigentes y en la bitácora: no se pregunta de nuevo.
-4. Responder: saludo según la hora de Argentina («Buen día / Buenas tardes / Buenas noches, Nicolás.») y en la línea siguiente «Mila, Vicki, Loki.». Después corto, rioplatense, con conclusiones: qué es urgente hoy y por qué, qué cambió desde el último chat, y cerrar con la acción concreta que Claude puede hacer ya. Si todo PASA, los controles no se informan.
+3. `python -I -X utf8 %USERPROFILE%\.loki\apertura_corta.py AAAA-MM-DD`: la apertura del día en un bloque corto (desde 27/11, Nicolás: «mejorar precisión y arranque»). Trae fuentes, próximo NM, controles, **vencidas (D02)**, revisar hoy, **ganadas sin entregar** (mira despacho y entrega), portada top 5, seguimientos de la semana y atrasados aparte, y continuidad. Se responde con esto; la portada y las listas largas de `abrir` ya no se leen.
+   - Lo ya decidido está en las reglas y en la bitácora: no se pregunta de nuevo.
+   - Cuando el PM arme `apertura.hoy` en Supabase, `apertura_corta.py` cambia de fuente y esta skill no cambia.
+4. Responder: saludo según la hora de Argentina («Buen día / Buenas tardes / Buenas noches, Nicolás.») y en la línea siguiente «Mila, Vicki, Loki.». Si la sesión corre en Opus, avisarlo en la primera línea después del saludo (DEC-1127a). Después corto, rioplatense, con conclusiones: qué es urgente hoy y por qué, qué cambió desde el último chat, y cerrar con la acción concreta que Claude puede hacer ya. Si todo PASA, los controles no se informan.
 
 ## Consultas de todos los días
 - Cliente: `loki_sql.py cliente CUIT|NOMBRE` (vista 360). Status con tarjeta: `loki_sql.py status CUIT|NOMBRE` (PNG y página del panel lateral).
