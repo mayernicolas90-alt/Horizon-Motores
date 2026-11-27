@@ -2,6 +2,8 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.17.1 (26/11, hacelo de Nicolás): L4 y L6 miran el corte de la recompra 4.1 (rec_sku, el de los renglones limpios) en
+        lugar de la tabla `recompra` 3.1, que ya no se usa (avisaban «recompra corte 20/11» con la 4.1 al día).
 1.17.0 (26/11, hacelo de Nicolás · control de contrato al arrancar): L10 frena la apertura (FALLA, arriba de todo) si el
         loki_sql en uso no es el de la tabla scripts o el del repo, o si los motores corren desde una rama que no es la
         principal (el 26/11 corrían desde loki/pasos-3-5-auditoria sin fusionar). Avisa si el repo tiene cambios sin subir.
@@ -125,7 +127,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.17.0"
+VERSION = "1.17.1"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -849,6 +851,16 @@ def rec41(db, datos):
     return True
 
 
+def corte_rec41(db):
+    """1.17.1: corte de la recompra 4.1 (el de los renglones limpios) si rec_sku tiene filas; si no, None."""
+    try:
+        r_sku, r_fue = qs(db, ['SELECT COUNT(*) n FROM rec_sku WHERE COALESCE(excluida, 0) = 0',
+                               "SELECT corte FROM limpia_fuentes WHERE fuente='renglones'"])
+    except Exception:  # noqa: BLE001  base sin tablas del datacenter
+        return None
+    return r_fue[0]['corte'] if r_sku and r_sku[0]['n'] and r_fue else None
+
+
 def bajar(db, raiz):
     datos, scr = os.path.join(raiz, 'DATOS'), os.path.join(raiz, 'SCRIPTS')
     for p in (datos, scr):
@@ -928,10 +940,16 @@ def controles(db, cg, hoy):
         if r[1][0][0] != cg[f]['filas']:
             falla.append(f"L3 {f}: {r[1][0][0]} filas en la base ≠ {cg[f]['filas']} registradas")
     edad = lambda c: (hoy - date.fromisoformat(str(c)[:10])).days if c else 999
+    # 1.17.1: la recompra que usa la apertura es la 4.1 (rec_sku, 1.14.0); su corte es el de los renglones limpios.
+    # Sin rec_sku (base vieja o autotest) L4/L6 miran la tabla `recompra` 3.1 como antes.
+    corte = {f: cg[f]['corte'] for f in ('R10', 'R8', 'recompra') if f in cg}
+    c41 = corte_rec41(db)
+    if c41:
+        corte['recompra'] = c41
     for f in ('R10', 'R8', 'recompra'):
-        if f in cg:
-            e = edad(cg[f]['corte'])
-            (falla if e > 14 else aviso if e > 3 else []).append(f'L4 {f} corte {str(cg[f]["corte"])[:10]} ({e} días)')
+        if f in corte:
+            e = edad(corte[f])
+            (falla if e > 14 else aviso if e > 3 else []).append(f'L4 {f} corte {str(corte[f])[:10]} ({e} días)')
     for f in crm:
         if f[4:] in CRM_ARRANQUE and edad(cg[f]['corte']) >= 1:   # 1.15.1: la apertura ve el CRM de hoy
             aviso.append(f'L4 {f} copiado el {str(cg[f]["corte"])[:10]}, no hoy: bajar el CRM (crm-desde) y abrir con --crm')
@@ -949,7 +967,7 @@ def controles(db, cg, hoy):
     if sin_origen:
         aviso.append('L9 copia del CRM sin origen registrado (anterior a 1.13.0): ' + ', '.join(sorted(sin_origen))
                      + ' · se corrige con la próxima copia completa con --origen')
-    if 'R10' in cg and 'recompra' in cg and str(cg['R10']['corte'])[:10] != str(cg['recompra']['corte'])[:10]:
+    if 'R10' in corte and 'recompra' in corte and str(corte['R10'])[:10] != str(corte['recompra'])[:10]:
         aviso.append('L6 recompra y R10 con cortes distintos')
     formato = []
     c = [dict(zip(r_con[0], f)) for f in r_con[1]]
