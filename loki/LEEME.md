@@ -6,7 +6,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 
 | Archivo | Versión | Qué hace | Autotest |
 |---|---|---|---|
-| `loki_sql.py` | 1.17.1 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status. Desde 1.12.0 `clientes` es una vista sobre el motor Cuentas (necesita `cuentas.py` en la misma carpeta) · 1.16.0: la apertura muestra la portada (un solo ranking, N01) y el registro de motores une k_motor con dc_motores · 1.17.0: L10 control de contrato · 1.17.1: L4/L6 miran el corte de la recompra 4.1 | `--autotest` (113/113) |
+| `loki_sql.py` | 1.18.0 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status. Desde 1.12.0 `clientes` es una vista sobre el motor Cuentas (necesita `cuentas.py` en la misma carpeta) · 1.16.0: la apertura muestra la portada (un solo ranking, N01) y el registro de motores une k_motor con dc_motores · 1.17.0: L10 control de contrato · 1.17.1: L4/L6 miran el corte de la recompra 4.1 · 1.18.0: filtro de propuestas del arranque (tuya · no decidida · dato de hoy · modelo) | `--autotest` (127/127) |
 | `loki.py` | v3 | Números de la apertura y urgentes (lo llama `loki_sql.py abrir`) | — |
 | `motor.py` | 1.2.0 | Pedidos de producto: lista del CRM, stock (Hive en vivo o R8), fichas técnicas | `--autotest` (28/28) |
 | `motor_regresion.py` | 1.0 | Corre un `motor.py` sobre las cotizaciones del CRM para comparar versiones | — |
