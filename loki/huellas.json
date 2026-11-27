@@ -4,8 +4,8 @@
  "scripts": {
   "loki_sql.py": {
    "origen": "loki-sql/scripts/loki_sql.py",
-   "huella": "b7f242f4c237",
-   "version": "1.17.0",
+   "huella": "a892f10f6dc7",
+   "version": "1.18.0",
    "test": [
     "--autotest"
    ]
@@ -168,6 +168,14 @@
    "origen": "nuevo 26/11 (nombre comercial -> código HIVE)",
    "huella": "77800beb3d06",
    "version": "1.0",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "apertura_corta.py": {
+   "origen": "loki/apertura_corta.py (nuevo 27/11)",
+   "huella": "05a827592dfc",
+   "version": "0.1",
    "test": [
     "--autotest"
    ]
