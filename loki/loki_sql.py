@@ -2,6 +2,8 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.18.1 (27/11, hacelo de Nicolás · D02, bitácora #267): la tarjeta de status ya no pide «nuevo estado o perdida» para
+        las vencidas: dice que se pasan 5 días salvo que Nicolás diga perdida.
 1.18.0 (26/11, hacelo de Nicolás · filtro de propuestas del arranque): antes de mostrar la apertura, todo lo que propone
         (portada, cortas, posventa, facturas sin cargar) pasa por cuatro preguntas sacadas de los errores de la bitácora:
         ¿es tuya? (ficha archivada/otro vendedor/no prospectar, Cuentas, y factura sin ficha con vendedor que no es Nicolás:
@@ -135,7 +137,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.18.0"
+VERSION = "1.18.1"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -2708,7 +2710,9 @@ def status_html(db, d):
     av = []
     venc = [c for c in d['abiertas'] if c['vencida']]
     if venc:
-        av.append(f"<b class=rd>Vencidas:</b> {_h(' · '.join(c['numero'] + ' (' + _dm(c['vence']) + ')' for c in venc))}: elegí nuevo estado o perdida.")
+        nuevo = (date.fromisoformat(hoy[:10]) + __import__('datetime').timedelta(days=5)).isoformat()   # 1.18.1 D02: se pasan 5 días
+        av.append(f"<b class=rd>Vencidas:</b> {_h(' · '.join(c['numero'] + ' (' + _dm(c['vence']) + ')' for c in venc))}: "
+                  f"se pasan al {_dm(nuevo)} salvo que digas perdida.")
     if op.get('proxima_fecha') and op['proxima_fecha'][:10] < hoy:
         av.append(f"El <b>seguimiento del {_dm(op['proxima_fecha'])}</b> está vencido.")
     if not op.get('marca_olt'):
