@@ -174,8 +174,8 @@
   },
   "apertura_corta.py": {
    "origen": "loki/apertura_corta.py (nuevo 27/11)",
-   "huella": "05a827592dfc",
-   "version": "0.1",
+   "huella": "18c3908112fe",
+   "version": "0.2",
    "test": [
     "--autotest"
    ]
