@@ -2,6 +2,14 @@
 """loki_sql.py v1.10.1 · la base SQL propia de Loki (Turso horizon-nicom90) · 22/11/2026
 
 Loki es independiente: su estado vive en SU base SQL. El CRM 5SPm se LEE (ArtifactData) y se copia acá (FLgX: congelado).
+1.18.0 (26/11, hacelo de Nicolás · filtro de propuestas del arranque): antes de mostrar la apertura, todo lo que propone
+        (portada, cortas, posventa, facturas sin cargar) pasa por cuatro preguntas sacadas de los errores de la bitácora:
+        ¿es tuya? (ficha archivada/otro vendedor/no prospectar, Cuentas, y factura sin ficha con vendedor que no es Nicolás:
+        #204/#211) · ¿ya está decidida? (decisión negativa en la bitácora en la misma frase que la referencia: #198/#211) ·
+        ¿el dato es de hoy? (cotización que ya no está abierta en el CRM: NM59 26/11; acción con «hoy dd/mm» vieja) ·
+        ¿el producto tiene modelo? (ONU/ONT sin modelo: #151/#188). Lo que no pasa sale como «fuera: … (motivo)»; lo dudoso
+        como «revisar: …». La memoria se muestra desde memoria.json ya filtrado; «STATUS al día» y «CRM EN TABLAS» ya no se
+        imprimen si no hay nada que hacer. L11 avisa si el filtro no corrió.
 1.17.1 (26/11, hacelo de Nicolás): L4 y L6 miran el corte de la recompra 4.1 (rec_sku, el de los renglones limpios) en
         lugar de la tabla `recompra` 3.1, que ya no se usa (avisaban «recompra corte 20/11» con la 4.1 al día).
 1.17.0 (26/11, hacelo de Nicolás · control de contrato al arrancar): L10 frena la apertura (FALLA, arriba de todo) si el
@@ -127,7 +135,7 @@ import tempfile
 import urllib.request
 from datetime import date
 
-VERSION = "1.17.1"
+VERSION = "1.18.0"
 POR_AUDITOR = {'R4', 'R6', 'R7', 'R10', 'R15', 'R23'}   # 1.11.0: reportes de Finnegans que entran solo por loki/auditor.py
 TURSO = 'https://horizon-nicom90.aws-sa-east-1.turso.io'
 ESQUEMA = 7
@@ -1036,6 +1044,192 @@ def portada_a_top(filas, hoy_s):
     return dict(top5=top, fuente_top='portada', portada_calculado=calc or None, hoy=hoy_s)
 
 
+# ------------------------------------------------------------------ 1.18.0 filtro de propuestas del arranque
+# Nicolás 26/11 («hacelo»): todo lo que la apertura propone pasa por cuatro preguntas sacadas de los errores de la bitácora
+# (#204/#211 ofrecer lo que no es suyo · #151/#188 suponer el modelo · #166/#211 proponer lo ya decidido · NM59 26/11 dato viejo).
+# Lo que no pasa no se muestra como propuesta: queda en «fuera: … (motivo)». Lo dudoso queda con «revisar: …».
+COTS_ABIERTAS = ('enviada', 'espera_aprobacion')
+NEG_CUENTA = re.compile(r'no son (?:clientes? )?suy|no es (?:cliente )?suy|otro vendedor|no prospectar|no se trabaja|'
+                        r'cuenta (?:de|del?) (?:fede|federico|lucas|matias|jorge|joaquin)', re.I)
+NEG_REF = re.compile(NEG_CUENTA.pattern + r'|no se (?:crean|carga|cotiza)|perdid|descartad|anulad|archivad|ignorar', re.I)
+FECHA_ACCION = re.compile(r'\b(?:vence(?:n)?\s+)?hoy\s+(\d{1,2})/(\d{1,2})\b', re.I)
+MODELO = re.compile(r'\b(?:hg\d{3,4}\w*|eg\d{3,4}\w*|fitdp-?\w+|an\d{4}\w*|ma\d{4}\w*|sr\d{4}\w*|s\d{4}-?\w*|gc8b|gcob|gphf|gpoa|'
+                    r'gpcm\w*|pcb\w*|f\d{3}\w*)\b', re.I)
+GENERICO = re.compile(r'\b(?:onu|ont)s?\b', re.I)
+
+
+def _num_comp(c):
+    m = re.search(r'(\d+)\s*$', str(c or ''))
+    return str(int(m.group(1))) if m else None
+
+
+def _ref_en(texto, ref):
+    """¿El texto nombra esta cotización (NM52) o este comprobante (A-00005-00001711, FA 1711)?"""
+    if not ref:
+        return False
+    t = str(texto or '')
+    nm = re.match(r'\s*NM\s?(\d+)', str(ref), re.I)
+    if nm:
+        return bool(re.search(r'\bNM\s?0*%s\b' % nm.group(1), t, re.I))
+    n = _num_comp(ref)
+    return bool(n) and bool(re.search(r'(?:\bFA\s*(?:A-?\d{5}-?)?0*|\bA-?\d{5}-?0*)%s\b' % n, t, re.I))
+
+
+def filtrar(u, mem, r10, cue, opp, cot, bit, hoy_s):
+    """Pura (sin base, para el autotest): devuelve (urgentes, memoria, resultado) con las propuestas que pasan.
+    u/mem: urgentes.json y memoria.json · r10: filas del R10 (dict) · cue: cue_cuentas · opp: crm_oportunidad (id, cuit,
+    archivada, no_prospectar, otro_vendedor) · cot: crm_cotizacion (numero, estado) · bit: bitácora (id, fecha, tipo, cuit,
+    cuenta, tema, texto)."""
+    hoy = date.fromisoformat(hoy_s)
+    dig = lambda c: re.sub(r'\D', '', str(c or ''))
+    cue_id = {c['crm_id']: c for c in cue if c.get('crm_id')}
+    cue_cuit = {dig(c['cuit']): c for c in cue if c.get('cuit')}
+    cue_nom = {norm(c['empresa']): c for c in cue if c.get('empresa')}
+    opp_id = {o['id']: o for o in opp}
+    est_cot = {re.sub(r'\s', '', str(c['numero'] or '')).upper(): str(c.get('estado') or '') for c in cot if c.get('numero')}
+    si = lambda v: str(v).lower() in ('1', 'true', 'si', 'sí', 'yes')
+    fuera, revisar = [], []
+
+    def cuenta_de(it):
+        c = cue_id.get(it.get('id')) or cue_cuit.get(dig(it.get('cuit'))) or cue_nom.get(norm(it.get('cuenta')))
+        return c, (c or {}).get('crm_id') or it.get('id'), dig((c or {}).get('cuit') or it.get('cuit'))
+
+    def bit_de(cid, cuit, nombre):
+        nn = norm(nombre)
+        return [b for b in bit if (cuit and dig(b.get('cuit')) == cuit) or (cid and (b.get('cuenta') == cid or cid in str(b.get('texto'))))
+                or (nn and len(nn) > 4 and (norm(b.get('cuenta')) == nn or nn in norm(b.get('tema'))))]
+
+    def mirar(it, lista):
+        """None si pasa; motivo (str) si queda fuera. Suma a `revisar` lo dudoso."""
+        c, cid, cuit = cuenta_de(it)
+        o = opp_id.get(cid) or {}
+        ref = it.get('ref') or it.get('comp')
+        # 1 · ¿es tuya?
+        for k, txt in (('otro_vendedor', 'ficha de otro vendedor'), ('no_prospectar', 'ficha en no prospectar'),
+                       ('archivada', 'ficha archivada')):
+            if si(o.get(k)):
+                return f'no es tuya: {txt}'
+        if c and str(c.get('trabajar')) == '0':
+            return f"no se trabaja (Cuentas: {c.get('estado')}{' · ' + c['motivo'] if c.get('motivo') else ''})"
+        if lista == 'facturas':
+            v = norm(it.get('vendedor'))
+            if not cid and v != 'nicolas mayer':
+                return f"no es tuya: sin ficha en el CRM y vendedor «{it.get('vendedor') or 'sin vendedor'}» en el R10"
+        # 2 · ¿ya está decidida?
+        bs = bit_de(cid, cuit, it.get('cuenta'))
+        for b in sorted(bs + [b for b in bit if ref and _ref_en(b.get('texto'), ref) and b not in bs], key=lambda b: -int(b['id'])):
+            t = f"{b.get('tema')} {b.get('texto')}"
+            # la decisión negativa tiene que estar en la MISMA frase que la referencia: un cierre de chat nombra muchas
+            # cotizaciones y una «perdida» de otra no saca esta (NM60 Bertone vs «NM47 Pampacom perdida» en #201)
+            neg_ref = ref and any(_ref_en(s, ref) and NEG_REF.search(s) for s in re.split(r';|·|\n|\.\s', t))
+            if neg_ref or (b in bs and NEG_CUENTA.search(t)):
+                return f"ya decidido en la bitácora #{b['id']} ({str(b.get('fecha'))[5:10]}): {str(b.get('tema'))[:60]}"
+        # 4 · ¿el dato es de hoy?
+        nm = re.match(r'\s*(NM\s?\d+)', str(it.get('ref') or ''), re.I)
+        if nm and lista == 'cortas':
+            e = est_cot.get(nm.group(1).replace(' ', '').upper())
+            if e and e not in COTS_ABIERTAS:
+                return f'{nm.group(1)} está «{e}» en el CRM de hoy'
+        txt = f"{it.get('accion') or ''} {it.get('por_que') or ''}"
+        for d_, m_ in FECHA_ACCION.findall(txt):
+            try:
+                f = date(hoy.year - (1 if int(m_) > hoy.month + 1 else 0), int(m_), int(d_))
+            except ValueError:
+                continue
+            if f < hoy:
+                revisar.append(f"{it.get('cuenta')}: la acción dice «hoy {d_}/{m_}» (texto viejo de la ficha): leer la ficha viva")
+                break
+        # 3 · ¿el producto tiene modelo?
+        if GENERICO.search(txt) and not MODELO.search(txt):
+            revisar.append(f"{it.get('cuenta')}: nombra ONU/ONT sin modelo: resolver con equivalencias.py y HIVE, no suponer")
+        return None
+
+    u, mem = json.loads(json.dumps(u or {})), json.loads(json.dumps(mem or {}))
+    n = 0
+    for lista in ('top5', 'cortas', 'posventa'):
+        quedan = []
+        for it in u.get(lista) or []:
+            n += 1
+            mot = mirar(it, lista)
+            if mot:
+                fuera.append(dict(lista=lista, cuenta=it.get('cuenta'), ref=it.get('ref'), motivo=mot))
+            else:
+                quedan.append(it)
+        if lista in u:
+            u[lista] = quedan
+    por_comp = {}
+    for r in r10 or []:
+        por_comp.setdefault(r.get('Comprobante'), r)
+    quedan = []
+    for x in mem.get('facturas_sin_cargar') or []:
+        n += 1
+        r = por_comp.get(x.get('comp')) or {}
+        it = dict(x, cuenta=x.get('cliente'), vendedor=r.get('Vendedor'),
+                  cuit=r.get('Nro de identificación') or r.get('Identificacion Tributaria'))
+        mot = mirar(it, 'facturas')
+        if mot:
+            fuera.append(dict(lista='facturas', cuenta=x.get('cliente'), ref=x.get('comp'), motivo=mot))
+        else:
+            quedan.append(x)
+    if 'facturas_sin_cargar' in mem:
+        mem['facturas_sin_cargar'] = quedan
+    sacadas = {norm(f['cuenta']) for f in fuera if f['lista'] == 'top5'}
+    if mem.get('lineas'):
+        mem['lineas'] = [l for l in mem['lineas'] if not (l.get('lista') == 'top5' and norm(l.get('cuenta')) in sacadas)]
+    return u, mem, dict(version=VERSION, hoy=hoy_s, propuestas=n, fuera=fuera, revisar=list(dict.fromkeys(revisar)))
+
+
+def filtro_apertura(db, datos, hoy_s):
+    """Lee lo que hace falta de la base y de DATOS, filtra y reescribe urgentes.json y memoria.json (deja filtro.json)."""
+    j = lambda n: json.load(open(os.path.join(datos, n), encoding='utf-8')) if os.path.exists(os.path.join(datos, n)) else {}
+    u, mem = j('urgentes.json'), j('memoria.json')
+    desde = date.fromordinal(date.fromisoformat(hoy_s).toordinal() - 60).isoformat()
+    cue, opp, cot, bit = qs(db, [
+        'SELECT crm_id, cuit, empresa, estado, trabajar, motivo FROM cue_cuentas',
+        'SELECT id, cuit, empresa, archivada, no_prospectar, otro_vendedor FROM crm_oportunidad',
+        'SELECT numero, estado FROM crm_cotizacion',
+        ("SELECT id, fecha, tipo, cuit, cuenta, tema, texto FROM bitacora WHERE fecha >= ? AND tipo IN ('decision', 'cierre', 'hecho')",
+         [desde])])
+    p = os.path.join(datos, 'R10.csv')
+    r10 = list(csv.DictReader(open(p, encoding='utf-8-sig'), delimiter=';')) if os.path.exists(p) else []
+    u2, mem2, res = filtrar(u, mem, r10, cue, opp, cot, bit, hoy_s)
+    for n, d in (('urgentes.json', u2), ('memoria.json', mem2), ('filtro.json', res)):
+        json.dump(d, open(os.path.join(datos, n), 'w', encoding='utf-8'), ensure_ascii=False)
+    return res
+
+
+def filtro_texto(res):
+    if not res:
+        return 'FILTRO no corrió'
+    f, r = res['fuera'], res['revisar']
+    out = [f"FILTRO {res['propuestas']} propuestas · {len(f)} fuera · {len(r)} a revisar" if f or r else
+           f"FILTRO OK · {res['propuestas']} propuestas pasan (tuya · no decidida · dato de hoy · modelo)"]
+    out += [f"  fuera: {x['cuenta']}{' (' + str(x['ref']) + ')' if x.get('ref') else ''} · {x['motivo']}" for x in f[:12]]
+    out += [f'  revisar: {x}' for x in r[:8]]
+    return '\n'.join(out)
+
+
+def memoria_texto(datos, p):
+    """1.18.0: la memoria se muestra desde memoria.json ya filtrado (no desde la salida cruda de memoria_check), y solo lo que
+    pide algo: AJUSTAR / AVISO, cuentas sin regla y facturas sin cargar. Si todo está OK, una línea."""
+    pm = os.path.join(datos, 'memoria.json')
+    if not os.path.exists(pm):
+        return f"MEMORIA sin salida (exit {p.returncode if p else '?'}) {(p.stderr.strip()[-120:] if p else '')}"
+    m = json.load(open(pm, encoding='utf-8'))
+    li = [l for l in m.get('lineas') or [] if set(l.get('codigos') or []) & {'AJUSTAR', 'AVISO'}]
+    fac, sin = m.get('facturas_sin_cargar') or [], m.get('sin_regla') or []
+    if not (li or fac):
+        return f"MEMORIA OK · {len(m.get('lineas') or [])} propuestas sin conflicto con la memoria de cuentas"
+    out = [f"MEMORIA v{m.get('version')} · ajustar/avisar {len(li)} · facturas sin cargar {len(fac)}"
+           + (f" · sin regla: {', '.join(sin[:6])}" if sin else '')]
+    for l in li:
+        out.append(f"  {'/'.join(dict.fromkeys(l['codigos']))} {l['cuenta']}: {' · '.join(l.get('motivos') or [])[:160]}"
+                   + (f" → {l['accion'][:110]}" if l.get('accion') and l.get('accion') != l.get('accion_loki') else ''))
+    if fac:
+        out.append(f'  FACTURAS SIN CARGAR ({len(fac)}): ' + ' · '.join(f"{x['comp']} {x['fecha']} {x['cliente']} ({x['prod']})"[:70] for x in fac))
+    return '\n'.join(out)
+
+
 def apertura(datos, clase, falla, aviso):
     j = lambda n: json.load(open(os.path.join(datos, n), encoding='utf-8')) if os.path.exists(os.path.join(datos, n)) else None
     a, u = j('abrir.json'), j('urgentes.json')
@@ -1133,8 +1327,17 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False, origen
         b, gsd = b[0], gsd[0]['n']
     except Exception:  # noqa: BLE001  se cae a las consultas sueltas de siempre
         con, b, ult, gsd = q(db, "SELECT importante FROM continuidad WHERE id='actual'"), None, None, None
+    # 1.18.0: memoria_check corre antes de mostrar nada y el filtro de propuestas limpia urgentes.json y memoria.json
+    p_mem = subprocess.run(py + [os.path.join(scr, 'memoria_check.py'), datos, hoy_s], capture_output=True, text=True, timeout=300)
+    try:
+        res_f = filtro_apertura(db, datos, hoy_s) if clase != 'NO_LISTO_DATOS' else None
+    except Exception as e:  # noqa: BLE001  sin filtro la apertura lo dice: no se muestran propuestas sin filtrar como firmes
+        res_f = None
+        aviso.append(f'L11 el filtro de propuestas no corrió ({str(e)[:80]}): revisar cada propuesta contra la bitácora y el vendedor')
     print('IMPORTANTE: ' + ((con[0]['importante'] or '(continuidad sin importante: avisar y rehacerla al cerrar)') if con else '(sin continuidad)'))
     print(apertura(datos, clase, falla, aviso))
+    if clase != 'NO_LISTO_DATOS':
+        print(filtro_texto(res_f))
     try:
         b = b or q(db, "SELECT COUNT(*) n, SUM(estado='abierto') a FROM bitacora")[0]
         ult = ult if ult is not None else q(db, "SELECT id, fecha, tema FROM bitacora WHERE origen NOT LIKE 'continuidad:%' ORDER BY id DESC LIMIT 3")
@@ -1151,10 +1354,11 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False, origen
             print('VERIFICADO SIN PUBLICAR: ' + ' · '.join(f"lote {p['lote']} ({p['n']})" for p in pen) + ' · se carga con su «hacelo»')
     except Exception:  # noqa: BLE001
         pass
-    try:
+    try:   # 1.18.0: solo se muestra si hay algo que hacer (ganadas sin despacho) o si falló
         if isinstance(ncrm, dict):
             g = gsd if gsd is not None else q(db, 'SELECT COUNT(*) n FROM v_ganadas_sin_despacho')[0]['n']
-            print('CRM EN TABLAS ' + ' · '.join(f'{k} {v}' for k, v in ncrm.items()) + f' · ganadas sin dato de despacho {g}')
+            if g:
+                print(f'GANADAS SIN DATO DE DESPACHO {g} (v_ganadas_sin_despacho)')
         else:
             print(f'CRM EN TABLAS {ncrm}')
     except Exception as e:  # noqa: BLE001
@@ -1165,20 +1369,9 @@ def abrir(db, raiz, hoy_s, crm_dir=None, reglas=False, incremental=False, origen
             r = status_calcular(db, hoy_s)
             print(f"STATUS recalculado ({', '.join(viejo)} nuevo): {r['fichas']} fichas en {r['total_s']} s · CONTROL: "
                   + ('PASA' if not r['fallan'] else f"FALLA en {len(r['fallan'])} fichas (ver status-calcular)"))
-        else:
-            u = q(db, 'SELECT MAX(calculado) c, COUNT(*) n FROM status_cliente')[0]
-            print(f"STATUS al día: {u['n']} fichas calculadas {u['c']}")
-    except Exception as e:  # noqa: BLE001  la apertura no se cae por esto
+    except Exception as e:  # noqa: BLE001  la apertura no se cae por esto (1.18.0: «STATUS al día» ya no se imprime)
         print(f'STATUS no se recalculó ({str(e)[:80]}): correr status-calcular')
-    p = subprocess.run(py + [os.path.join(scr, 'memoria_check.py'), datos, hoy_s], capture_output=True, text=True, timeout=300)
-    lineas = [l for l in p.stdout.splitlines() if l.strip()]
-    print('MEMORIA ' + (' '.join(lineas[:1]) if lineas else f'sin salida (exit {p.returncode})'))
-    for l in lineas[1:]:
-        if not l.startswith(('BOX ', 'FACTURA_SIN_CARGAR')):
-            print('  ' + l.strip()[:200])
-    fac = [l.split(None, 1)[1][:70] for l in lineas if l.startswith('FACTURA_SIN_CARGAR')]
-    if fac:
-        print(f'  FACTURAS SIN CARGAR ({len(fac)}): ' + ' · '.join(fac))
+    print(memoria_texto(datos, p_mem))
     if reglas:
         k = conocimiento(db)
         ped = (('respuestas', '1.'),) if k else (('reglas', 'Parte 0'), ('preferencias', None), ('respuestas', '1.'))
@@ -1938,6 +2131,58 @@ def autotest():
         chk('1.16.0 registro: versión de dc_motores y de este archivo, el resto queda', v['loki_sql'] == VERSION and v['recompra'] == '4.1'
             and v['sales_engine'] == '4.7')
         chk('1.16.0 registro: motor del datacenter sin ficha en k_motor se avisa', [r['falta'] for r in rm if r.get('falta')] == ['portada'])
+        # 1.18.0 filtro de propuestas: cada caso es un error real de la bitácora
+        fu = dict(top5=[dict(cuenta='Cablenet', id='r036-cablenet', usd=2897, accion='Despachar la NM52 (50 HG6145F3): el plazo vence hoy 17/11'),
+                        dict(cuenta='CEVIC', id='q-cevic', usd=900, accion='Cotizar ONU wifi 5 para la ampliación'),
+                        dict(cuenta='Coop Achiras', id='q-achiras', usd=500, accion='Ofrecer ONU HG6145F3'),
+                        dict(cuenta='Iplus', id='r-iplus', usd=800, accion='Renovar NM43'),
+                        dict(cuenta='Sol-Informaticas', id='w-sol', usd=700, accion='Recompra: 20 ONT HG6543D')],
+                  cortas=[dict(cuenta='Wall', ref='NM59', usd=500, accion='preguntar'), dict(cuenta='Telviso', ref='NM46', usd=1171, accion='preguntar')],
+                  posventa=[])
+        fm = dict(lineas=[dict(cuenta='Iplus', lista='top5', codigos=['OK'])],
+                  facturas_sin_cargar=[dict(comp='A-00005-00001711', fecha='2026-10-30', cliente='Pedro Lazzatti', prod='Ont Gpon HG6543D'),
+                                       dict(comp='A-00005-00001728', fecha='2026-11-19', cliente='Coop. de Servicios Públicos de Sampacho LTDA', prod='Drop'),
+                                       dict(comp='A-00005-00001740', fecha='2026-11-24', cliente='Telviso', prod='Drop'),
+                                       dict(comp='A-00005-00001741', fecha='2026-11-24', cliente='Nuevo SRL', prod='Drop')])
+        fr10 = [{'Comprobante': 'A-00005-00001711', 'Vendedor': 'Ventas Horizon', 'Nro de identificación': '20-25560990-5'},
+                {'Comprobante': 'A-00005-00001728', 'Vendedor': 'Ventas Horizon', 'Nro de identificación': '30-54576018-1'},
+                {'Comprobante': 'A-00005-00001740', 'Vendedor': 'Ventas Horizon', 'Nro de identificación': '30-57186735-0'},
+                {'Comprobante': 'A-00005-00001741', 'Vendedor': 'Nicolas Mayer', 'Nro de identificación': '30-99999999-9'}]
+        fcue = [dict(crm_id='r036-cablenet', cuit='30643549960', empresa='Cablenet', trabajar=1), dict(crm_id='q-telviso', cuit='30571867350',
+                empresa='Telviso', trabajar=1), dict(crm_id='q-achiras', cuit='30111111111', empresa='Coop Achiras', trabajar=0, estado='otro vendedor',
+                motivo='Federico Núñez'), dict(crm_id=None, cuit='20255609905', empresa='Pedro Lazzatti', trabajar=1),
+                dict(crm_id='r-iplus', cuit='30222222222', empresa='Iplus', trabajar=1), dict(crm_id='w-sol', cuit='30333333333', empresa='Sol-Informaticas', trabajar=1)]
+        fopp = [dict(id='r-iplus', archivada=True), dict(id='r036-cablenet'), dict(id='w-sol')]
+        fcot = [dict(numero='NM59', estado='ganada'), dict(numero='NM46', estado='enviada')]
+        fbit = [dict(id=198, fecha='2026-11-25', tipo='decision', cuit=None, cuenta=None, tema='Facturas que no son de Nicolás',
+                     texto='FA A-00005-00001711 (Pedro Lazzatti) y FA A-00005-00001728 (Sampacho), vendedor Ventas Horizon, no son clientes suyos'),
+                dict(id=150, fecha='2026-11-20', tipo='hecho', cuit='30643549960', cuenta='r036-cablenet', tema='Cablenet NM52', texto='pagó la NM52'),
+                dict(id=201, fecha='2026-11-25', tipo='cierre', cuit=None, cuenta=None, tema='Cierre chat 25/11',
+                     texto='NM47 Pampacom perdida; NM46 Telviso renovada; Lazzatti/Sampacho no son clientes.')]
+        u2, m2, fres = filtrar(fu, fm, fr10, fcue, fopp, fcot, fbit, '2026-11-26')
+        fz = {(x['cuenta'], x.get('ref')): x['motivo'] for x in fres['fuera']}
+        quedan = [x['cuenta'] for x in u2['top5']]
+        chk('1.18.0 filtro #211/#198: facturas de Lazzatti y Sampacho quedan fuera', ('Pedro Lazzatti', 'A-00005-00001711') in fz
+            and any(k[1] == 'A-00005-00001728' for k in fz))
+        chk('1.18.0 filtro #198: el motivo cita la bitácora o el vendedor', '#198' in fz[('Pedro Lazzatti', 'A-00005-00001711')]
+            or 'vendedor' in fz[('Pedro Lazzatti', 'A-00005-00001711')])
+        chk('1.18.0 filtro: factura de cliente con ficha y factura de Nicolás pasan',
+            [x['comp'] for x in m2['facturas_sin_cargar']] == ['A-00005-00001740', 'A-00005-00001741'])
+        chk('1.18.0 filtro #204: cuenta de otro vendedor (Cuentas) queda fuera', 'Coop Achiras' not in quedan
+            and 'no se trabaja' in fz[('Coop Achiras', None)])
+        chk('1.18.0 filtro: ficha archivada queda fuera y sale de la memoria', 'Iplus' not in quedan and not m2['lineas'])
+        chk('1.18.0 filtro NM59 26/11: cotización ganada no sale en cortas', [x['ref'] for x in u2['cortas']] == ['NM46']
+            and 'ganada' in fz[('Wall', 'NM59')])
+        chk('1.18.0 filtro #151/#188: ONU sin modelo queda a revisar, no se supone', 'CEVIC' in quedan
+            and any(r.startswith('CEVIC') and 'sin modelo' in r for r in fres['revisar']))
+        chk('1.18.0 filtro: ONT con modelo no se marca', not any(r.startswith(('Sol-Informaticas', 'Cablenet')) and 'modelo' in r for r in fres['revisar']))
+        chk('1.18.0 filtro: «vence hoy 17/11» el 26/11 queda a revisar', any(r.startswith('Cablenet') and '17/11' in r for r in fres['revisar']))
+        chk('1.18.0 filtro: un hecho de la bitácora sin decisión negativa no saca la cuenta', 'Cablenet' in quedan)
+        chk('1.18.0 filtro #201: una «perdida» de otra cotización en el mismo cierre no saca NM46', ('Telviso', 'NM46') not in fz)
+        chk('1.18.0 filtro: cuenta normal pasa', 'Sol-Informaticas' in quedan and fres['propuestas'] == 11)
+        tx = filtro_texto(fres)
+        chk('1.18.0 filtro: el texto muestra fuera y revisar', 'fuera: Pedro Lazzatti' in tx and 'revisar: CEVIC' in tx)
+        chk('1.18.0 filtro: sin nada que sacar, una línea OK', filtro_texto(dict(propuestas=3, fuera=[], revisar=[])).startswith('FILTRO OK'))
         db.close()
     finally:
         os.environ.pop('LOKI_SQL_LOCAL', None)
