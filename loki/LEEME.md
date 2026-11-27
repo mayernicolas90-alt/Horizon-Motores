@@ -6,7 +6,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 
 | Archivo | Versión | Qué hace | Autotest |
 |---|---|---|---|
-| `loki_sql.py` | 1.17.0 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status. Desde 1.12.0 `clientes` es una vista sobre el motor Cuentas (necesita `cuentas.py` en la misma carpeta) · 1.16.0: la apertura muestra la portada (un solo ranking, N01) y el registro de motores une k_motor con dc_motores | `--autotest` (106/106) |
+| `loki_sql.py` | 1.17.1 | Base de Loki: arranque (`abrir`), copia del CRM, cargas de reportes y recompra, cerebro, bitácora vieja, fichas, status. Desde 1.12.0 `clientes` es una vista sobre el motor Cuentas (necesita `cuentas.py` en la misma carpeta) · 1.16.0: la apertura muestra la portada (un solo ranking, N01) y el registro de motores une k_motor con dc_motores · 1.17.0: L10 control de contrato · 1.17.1: L4/L6 miran el corte de la recompra 4.1 | `--autotest` (113/113) |
 | `loki.py` | v3 | Números de la apertura y urgentes (lo llama `loki_sql.py abrir`) | — |
 | `motor.py` | 1.2.0 | Pedidos de producto: lista del CRM, stock (Hive en vivo o R8), fichas técnicas | `--autotest` (28/28) |
 | `motor_regresion.py` | 1.0 | Corre un `motor.py` sobre las cotizaciones del CRM para comparar versiones | — |
@@ -26,6 +26,10 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 | `ventas.py` | 1.0 | **Ventas de un mes desde el CRM** (el tablero vivo, nunca Finnegans): aceptadas por fechaGanada, neto sin IVA, sin archivadas ni vendedor «otro» (P21). `conauth.py ventas.py AAAA-MM` → JSON corto con detalle y fuente. Lo usa el control C09 (octubre 2026 fijo en USD 73.964,21) | C09 (5 casos) |
 | `volcar.py` | 1.0 | **Respaldo local** de la base: vuelca Turso a un SQLite (solo lee Turso), con conteos por tabla y control PASA/FALLA; no pisa un respaldo existente. `conauth.py volcar.py loki_sql.py SALIDA.sqlite`. Privado (D10) | — (probado 26/11: 84 tablas, PASA) |
 | `partir_respaldo.py` | 1.0 | **Plan B del arranque**: si no se puede leer el CRM 5SPm, parte el JSON exportado (`Horizon-CRM-respaldo-*.json`) en oportunidades, cotizaciones y muestras para `abrir --crm` (copia completa) | — |
+
+## Skill de arranque
+
+`skills/loki-maestro/SKILL.md` (3.0, 26/11): fuente de la skill «Loki» de claude.ai. Arranque con `loki_sql.py` y el CRM 5SPm (sin `horizon-db` ni `correr_dia.py`), reportes de Finnegans, escrituras y cierre. Si se cambia acá, se vuelve a subir el zip en claude.ai (Configuración → Capacidades → Skills).
 
 ## Datacenter (desde el 24/11, DEC-1124a/b/c)
 
