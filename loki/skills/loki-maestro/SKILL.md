@@ -18,7 +18,7 @@ Versión 4.0 · 28/11/2026 (arranque desde Supabase con `loki_supa.py apertura`,
 
 ## Arranque veloz (desde 4.0, sin preguntar)
 0. **En silencio:** mientras se trabaja, el único texto visible es `Loading…`. El primer texto real es el saludo del paso 4.
-A. **Un comando:** `python -I -X utf8 %USERPROFILE%\.loki\loki_supa.py apertura` (Supabase, <1 s). Trae próximo NM, controles, vencen en 7 días, ganadas sin entregar, portada, seguimientos y continuidad. Si la línea CONTROLES da PASA en todo (en especial `fuente CRM`), se responde con eso y se salta a 4.
+A. **Un comando:** `python -I -X utf8 %USERPROFILE%\.loki\loki_supa.py apertura` (Supabase, una sola consulta, <1 s; desde loki_supa 0.3 sin recortes). Trae próximo NM, controles, fecha de cada fuente, vencidas, vencen en 7 días, ganadas sin entregar, top 5 con la acción de hoy, seguimientos de la semana y atrasados, continuidad y reglas duras: no hace falta ninguna otra consulta para abrir. Si la línea CONTROLES da PASA en todo (en especial `fuente CRM`), se responde con eso y se salta a 4.
 B. **Solo si `fuente CRM` no da PASA** (o loki_supa falla): arranque de respaldo por Turso, pasos 1 y 2. Decir en una línea que se usó el respaldo y por qué.
    - Lo que se cargó en el CRM 5SPm después del último `sync_crm.py` todavía no está en Supabase: si Nicolás pregunta por algo de hoy, leerlo del CRM por ArtifactData.
 
