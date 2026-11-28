@@ -29,7 +29,7 @@ Desde el 17/11/2026 Loki trabaja sobre **su propia base** (Turso `horizon-nicom9
 
 ## Skill de arranque
 
-`skills/loki-maestro/SKILL.md` (3.0, 26/11): fuente de la skill «Loki» de claude.ai. Arranque con `loki_sql.py` y el CRM 5SPm (sin `horizon-db` ni `correr_dia.py`), reportes de Finnegans, escrituras y cierre. Si se cambia acá, se vuelve a subir el zip en claude.ai (Configuración → Capacidades → Skills).
+`skills/loki-maestro/SKILL.md` (4.0, 28/11): fuente de la skill «Loki» de claude.ai. Arranque veloz con `loki_supa.py apertura` (Supabase); respaldo con `loki_sql.py` y el CRM 5SPm (sin `horizon-db` ni `correr_dia.py`), reportes de Finnegans, escrituras y cierre. Si se cambia acá, se vuelve a subir el zip en claude.ai (Configuración → Capacidades → Skills).
 
 ## Datacenter (desde el 24/11, DEC-1124a/b/c)
 
