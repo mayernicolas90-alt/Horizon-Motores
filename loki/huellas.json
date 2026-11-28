@@ -181,9 +181,17 @@
    ]
   },
   "espejo.py": {
-   "origen": "nuevo 28/11 (Espejo a Supabase, hacelo de Nicolás)",
-   "huella": "34ea6ea95166",
-   "version": "0.1.1",
+   "origen": "nuevo 28/11 · 0.2: también las tablas propias de Loki (hilo, conocimiento, alias), por clave",
+   "huella": "e413e2ca28b6",
+   "version": "0.2",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "loki_supa.py": {
+   "origen": "nuevo 28/11 (Loki opera leyendo Supabase)",
+   "huella": "53d82ba2976e",
+   "version": "0.1",
    "test": [
     "--autotest"
    ]

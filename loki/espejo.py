@@ -16,13 +16,20 @@ Uso (python3 -I):  espejo.py correr [--escribir] [--solo MOTOR] [--loki RUTA] ·
 """
 import datetime as D, hashlib, importlib.util, json, math, os, re, sys, urllib.error, urllib.request, collections
 
-VERSION = 'espejo 0.1 · 2026-11-28'
+VERSION = 'espejo 0.2 · 2026-11-28'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PROYECTO = 'dvmdwmytlqubllchkeii'
 API = f'https://api.supabase.com/v1/projects/{PROYECTO}/database/query'
 # tabla de Turso (contrato del motor) → tabla de Supabase (nota ar de la mudanza)
 DESTINO = {'rec_cliente': 'motores.recompra_cliente', 'rec_sku': 'motores.recompra_sku', 'pun_fichas': 'motores.puntaje',
            'por_dia': 'motores.portada', 'cue_cuentas': 'clientes.cuenta', 'cue_cuit': 'clientes.cuit', 'cue_marca': 'clientes.marca'}
+# 0.2 (28/11, Nicolás: «empezá a operar de Supabase»): tablas que escribe Loki mismo (no un motor). Se publican en cada corrida
+# para que Supabase tenga el hilo y el conocimiento al día. Con clave primaria se actualiza por clave y se conservan las columnas
+# que agregó otro (por ejemplo vendedor en comercial.cotizacion). La copia del CRM (comercial.*) la hace el PM: no se toca.
+DIRECTAS = {'bitacora': 'operacion.bitacora', 'tema': 'operacion.tema', 'tema_evento': 'operacion.tema_evento',
+            'continuidad': 'operacion.continuidad', 'k_regla': 'conocimiento.regla', 'k_decision': 'conocimiento.decision',
+            'k_preferencia': 'conocimiento.preferencia', 'k_procedimiento': 'conocimiento.procedimiento', 'k_motor': 'conocimiento.motor',
+            'k_fuente': 'conocimiento.fuente', 'k_documento': 'conocimiento.documento', 'cliente_alias': 'clientes.alias'}
 # limpia_* (Limpieza) no tienen destino hasta el duelo de la capa limpia con el Finnegans del PM: se informan y no se publican.
 
 
@@ -86,12 +93,19 @@ def columnas_supa(tabla):
         f"SELECT column_name FROM information_schema.columns WHERE table_schema='{esq}' AND table_name='{t}' ORDER BY ordinal_position")]
 
 
+def clave_primaria(tabla):
+    esq, t = tabla.split('.')
+    r = supa(f"SELECT a.attname FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace "
+             f"JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=ANY(i.indkey) WHERE i.indisprimary AND n.nspname='{esq}' AND c.relname='{t}'")
+    return [x['attname'] for x in r] or None
+
+
 def cuit11(v):
     d = re.sub(r'\D', '', str(v or ''))
     return d if len(d) == 11 else None
 
 
-def sql_publicar(tabla, filas, cols_destino, motor, version, hoy):
+def sql_publicar(tabla, filas, cols_destino, motor, version, hoy, pk=None):
     extra = {}
     if 'dueno' in cols_destino:
         extra['dueno'] = 'loki'
@@ -110,8 +124,18 @@ def sql_publicar(tabla, filas, cols_destino, motor, version, hoy):
     h = hashlib.sha256(js.encode()).hexdigest()[:16]
     det = json.dumps({'via': 'token de cuenta (provisorio, hasta el rol loki)', 'origen': 'Turso horizon-nicom90', 'espejo': VERSION},
                      ensure_ascii=False)
-    return h, (f"BEGIN; DELETE FROM {tabla}; "
-               f"INSERT INTO {tabla} SELECT * FROM json_populate_recordset(NULL::{tabla}, {lit(js)}::json); "
+    if pk:   # 0.2: por clave; las columnas que no vienen de Turso (las agregó otro) no se tocan
+        cols = sorted({k for g in datos for k in g})
+        sets = ', '.join(f'"{c}"=EXCLUDED."{c}"' for c in cols if c not in pk)
+        claves = ', '.join(f'"{c}"' for c in pk)
+        cuerpo = (f"DELETE FROM {tabla} t WHERE ({', '.join('t.' + chr(34) + c + chr(34) for c in pk)}) NOT IN "
+                  f"(SELECT {claves} FROM json_populate_recordset(NULL::{tabla}, {lit(js)}::json)); "
+                  f"INSERT INTO {tabla} ({', '.join(chr(34) + c + chr(34) for c in cols)}) SELECT {', '.join(chr(34) + c + chr(34) for c in cols)} "
+                  f"FROM json_populate_recordset(NULL::{tabla}, {lit(js)}::json) ON CONFLICT ({claves}) DO UPDATE SET {sets}; ")
+    else:
+        cuerpo = (f"DELETE FROM {tabla}; "
+                  f"INSERT INTO {tabla} SELECT * FROM json_populate_recordset(NULL::{tabla}, {lit(js)}::json); ")
+    return h, (f"BEGIN; {cuerpo}"
                f"INSERT INTO control.registro(cuando, agente, tabla, operacion, motor, version, hash_entrada, filas, detalle) "
                f"VALUES (now(), 'loki', '{tabla}', 'carga', '{motor}', {lit(version)}, '{h}', {len(datos)}, {lit(det)}::jsonb); COMMIT;")
 
@@ -197,6 +221,29 @@ def correr(escribir=False, solo=None, loki_ruta=None):
             salida.append((m['id'], t, dest, 'PUBLICADO PASA' if ok else 'PUBLICADO FALLA', f'{len(filas)} filas · iguales {ig2} · hash {h}'))
             if not ok:
                 break
+    for t, dest in ([] if solo or malas else DIRECTAS.items()):
+        filas = q(f'SELECT * FROM "{t}"')
+        cols_d = columnas_supa(dest)
+        comunes = [c for c in (filas[0].keys() if filas else []) if c in cols_d]
+        sel = ', '.join(chr(34) + c + chr(34) for c in comunes)
+        actual = supa(f'SELECT {sel} FROM {dest}') if comunes else []
+        ig, solo_t, solo_s = comparar(filas, actual, comunes)
+        if not solo_t and not solo_s:
+            salida.append(('loki', t, dest, 'AL DÍA', f'{len(filas)} filas iguales'))
+            continue
+        if not escribir:
+            salida.append(('loki', t, dest, 'CAMBIARÍA', f'{len(filas)} en Turso · {len(actual)} en Supabase · {solo_t} nuevas/cambiadas · {solo_s} salen'))
+            continue
+        pk = clave_primaria(dest)
+        h, sql = sql_publicar(dest, filas, cols_d, 'loki', VERSION, hoy, pk)
+        supa(sql, solo_lectura=False)
+        despues = supa(f'SELECT {sel} FROM {dest}')
+        ig2, a2, b2 = comparar(filas, despues, comunes)
+        ok = not a2 and not b2 and len(despues) == len(filas)
+        malas += not ok
+        salida.append(('loki', t, dest, 'PUBLICADO PASA' if ok else 'PUBLICADO FALLA', f'{len(filas)} filas · {solo_t} nuevas/cambiadas · hash {h}'))
+        if not ok:
+            break
     db.close()
     print(f'{VERSION} · ' + ('ESCRIBE' if escribir else 'solo compara (sin --escribir)'))
     for x in salida:
@@ -219,6 +266,11 @@ def autotest():
     casos.append(('comparación: distinto', comparar([{'a': 1}], [{'a': 2}], ['a']) == (0, 1, 1)))
     casos.append(('cuit11 de un DNI es nulo', cuit11('16497924') is None))
     casos.append(('limpia_* sin destino', not any(k.startswith('limpia') for k in DESTINO)))
+    h2, sq = sql_publicar('comercial.cotizacion', [{'id': 'a', 'numero': 'NM1'}], ['id', 'numero', 'vendedor', 'dueno', 'mudado'],
+                          'loki', 'v', '2026-11-28', ['id'])
+    casos.append(('con clave: actualiza por clave y conserva columnas ajenas', 'ON CONFLICT ("id") DO UPDATE' in sq and '"vendedor"' not in sq
+                  and 'NOT IN' in sq and sq.count('DELETE') == 1))
+    casos.append(('el CRM (comercial) no lo publica Loki', not any(v.startswith('comercial.') for v in DIRECTAS.values())))
     ok = sum(1 for _, b in casos if b)
     for n, b in casos:
         print(('  OK    ' if b else '  FALLA ') + n)
