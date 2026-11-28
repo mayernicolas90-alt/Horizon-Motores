@@ -14,7 +14,7 @@ proxy del entorno; nunca está en el código). Queda anotado en el registro: via
 
 Uso (python3 -I):  espejo.py correr [--escribir] [--solo MOTOR] [--loki RUTA] · espejo.py --contrato · espejo.py --autotest
 """
-import datetime as D, hashlib, importlib.util, json, math, os, re, sys, urllib.request, collections
+import datetime as D, hashlib, importlib.util, json, math, os, re, sys, urllib.error, urllib.request, collections
 
 VERSION = 'espejo 0.1 · 2026-11-28'
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -67,8 +67,11 @@ def supa(sql, solo_lectura=True):
     if _TOK[0]:
         hdr['Authorization'] = 'Bearer ' + _TOK[0]
     rq = urllib.request.Request(API, data=body, headers=hdr)
-    with urllib.request.urlopen(rq, timeout=120) as r:
-        return json.load(r)
+    try:
+        with urllib.request.urlopen(rq, timeout=120) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f'Supabase {e.code}: {e.read()[:400].decode(errors="replace")}') from None
 
 
 def lit(s):
@@ -110,7 +113,7 @@ def sql_publicar(tabla, filas, cols_destino, motor, version, hoy):
     return h, (f"BEGIN; DELETE FROM {tabla}; "
                f"INSERT INTO {tabla} SELECT * FROM json_populate_recordset(NULL::{tabla}, {lit(js)}::json); "
                f"INSERT INTO control.registro(cuando, agente, tabla, operacion, motor, version, hash_entrada, filas, detalle) "
-               f"VALUES (now(), 'loki', '{tabla}', 'reemplazo', '{motor}', {lit(version)}, '{h}', {len(datos)}, {lit(det)}::jsonb); COMMIT;")
+               f"VALUES (now(), 'loki', '{tabla}', 'carga', '{motor}', {lit(version)}, '{h}', {len(datos)}, {lit(det)}::jsonb); COMMIT;")
 
 
 # ------------------------------------------------------------------ comparación (misma regla que auditar_mudanza.py)
@@ -211,7 +214,7 @@ def autotest():
     casos.append(('cuit11 calculado', '"cuit11": "30714498173"' in sql))
     casos.append(('dueño y fecha de mudanza', '"dueno": "loki"' in sql and '"mudado": "2026-11-28"' in sql))
     casos.append(('texto con comillas y $$ no rompe el SQL', "O'Brien $$x$$" in sql and '$j' in sql))
-    casos.append(('queda en control.registro', 'INSERT INTO control.registro' in sql and "'reemplazo'" in sql))
+    casos.append(('queda en control.registro', 'INSERT INTO control.registro' in sql and "'carga'" in sql))
     casos.append(('comparación: iguales', comparar([{'a': 1, 'b': '2.50'}], [{'a': '1', 'b': 2.5}], ['a', 'b']) == (1, 0, 0)))
     casos.append(('comparación: distinto', comparar([{'a': 1}], [{'a': 2}], ['a']) == (0, 1, 1)))
     casos.append(('cuit11 de un DNI es nulo', cuit11('16497924') is None))
