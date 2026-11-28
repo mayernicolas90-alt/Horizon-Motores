@@ -1,22 +1,28 @@
 ---
 name: loki-maestro
-description: "Usar cuando Nicolás escriba \"Loki\" al empezar un chat: arranque de Loki con su base Turso (horizon-nicom90) por loki_sql.py, con el CRM 5SPm al día, y status de cuenta. Solo en la app de escritorio (Code), cuenta mayernicolas90-alt."
+description: "Usar cuando Nicolás escriba \"Loki\" al empezar un chat: arranque veloz de Loki desde Supabase (loki_supa.py apertura), con Turso horizon-nicom90 solo de respaldo y para la bitácora, y status de cuenta. Solo en la app de escritorio (Code), cuenta mayernicolas90-alt."
 ---
 
-# Loki maestro · arranque con la base propia (Turso horizon-nicom90)
+# Loki maestro · arranque veloz desde Supabase
 
-Versión 3.2 · 27/11/2026 (arranque en un comando, D02 prorroga 5 días). Antes: 3.1 · 27/11/2026 (apertura corta), 3.0 · 26/11/2026. Reemplaza el arranque por `horizon-db` / `apertura_loki` y por `correr_dia.py` + colección `datacenter`: **no usar ninguno de los dos**. `horizon-db` corre desde `Motores-Horizon` sobre `C:\HorizonDB\horizon.db`, que es de la otra cuenta (nicolasmayer90-ship-it). Si esta skill y el CLAUDE.md de Nicolás dicen cosas distintas, manda el CLAUDE.md.
+Versión 4.0 · 28/11/2026 (arranque desde Supabase con `loki_supa.py apertura`, Nicolás 28/11 «hacelo»; Turso queda de respaldo y para bitácora/continuidad). Antes: 3.2 · 27/11/2026 (arranque en un comando, D02 prorroga 5 días), 3.1 · 27/11/2026 (apertura corta), 3.0 · 26/11/2026. Reemplaza el arranque por `horizon-db` / `apertura_loki` y por `correr_dia.py` + colección `datacenter`: **no usar ninguno de los dos**. `horizon-db` corre desde `Motores-Horizon` sobre `C:\HorizonDB\horizon.db`, que es de la otra cuenta (nicolasmayer90-ship-it). Si esta skill y el CLAUDE.md de Nicolás dicen cosas distintas, manda el CLAUDE.md.
 
 ## Dónde vive cada cosa (solo cuenta mayernicolas90-alt)
 - Carpeta de trabajo: `C:\Loki`. Scripts: `%USERPROFILE%\.loki`. Código: `C:\Horizon\Horizon-Motores` (carpeta `loki/`).
-- Base: Turso `horizon-nicom90`. Toda orden va con el token por `conauth.py`:
+- Datacenter: Supabase (proyecto horizon) con `loki_supa.py apertura | fuentes | cliente CUIT|texto | sql "SELECT …"` (solo lectura). Es la fuente de las consultas y del arranque.
+- Base propia: Turso `horizon-nicom90` (bitácora, continuidad, scripts y arranque de respaldo). Toda orden va con el token por `conauth.py`:
   `python -I -X utf8 %USERPROFILE%\.loki\conauth.py %USERPROFILE%\.loki\loki_sql.py …`
 - CRM: `5SPm4UZTgiF5JXx7GKTybq` (ArtifactData, cuenta nicolas.mayer90). FLgX está congelado: no se usa.
 - Base del PM `horizon-msyer`: **solo lectura** con `python -I -X utf8 %USERPROFILE%\.loki\pm_lectura.py tablas | "SELECT …"`. Lo que haya que cambiar ahí se pide por el buzón.
 - No se leen ni escriben `C:\HorizonDB` ni `C:\Horizon\Motores-Horizon` (otra cuenta).
 
-## Arranque (siempre con el CRM al día, sin preguntar)
+## Arranque veloz (desde 4.0, sin preguntar)
 0. **En silencio:** mientras se trabaja, el único texto visible es `Loading…`. El primer texto real es el saludo del paso 4.
+A. **Un comando:** `python -I -X utf8 %USERPROFILE%\.loki\loki_supa.py apertura` (Supabase, <1 s). Trae próximo NM, controles, vencen en 7 días, ganadas sin entregar, portada, seguimientos y continuidad. Si la línea CONTROLES da PASA en todo (en especial `fuente CRM`), se responde con eso y se salta a 4.
+B. **Solo si `fuente CRM` no da PASA** (o loki_supa falla): arranque de respaldo por Turso, pasos 1 y 2. Decir en una línea que se usó el respaldo y por qué.
+   - Lo que se cargó en el CRM 5SPm después del último `sync_crm.py` todavía no está en Supabase: si Nicolás pregunta por algo de hoy, leerlo del CRM por ArtifactData.
+
+## Arranque de respaldo (Turso, CRM al día)
 1. `loki_sql.py crm-desde AAAA-MM-DD` (fecha de hoy).
    - Si dice `DESDE X`: ArtifactData `query` sobre el CRM 5SPm de `cotizaciones`, `oportunidades` y `muestras` con `actualizado >= X` (limit 1000, `out_dir` a una carpeta nueva del scratchpad).
    - Si dice `COMPLETA`: `list` entero de las tres colecciones a esa carpeta.
