@@ -182,16 +182,16 @@
   },
   "espejo.py": {
    "origen": "nuevo 28/11 · 0.2: también las tablas propias de Loki (hilo, conocimiento, alias), por clave",
-   "huella": "e413e2ca28b6",
-   "version": "0.2",
+   "huella": "a5b05e0e2cca",
+   "version": "0.3",
    "test": [
     "--autotest"
    ]
   },
   "loki_supa.py": {
    "origen": "nuevo 28/11 (Loki opera leyendo Supabase)",
-   "huella": "53d82ba2976e",
-   "version": "0.1",
+   "huella": "daf87de7f671",
+   "version": "0.2",
    "test": [
     "--autotest"
    ]

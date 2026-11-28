@@ -16,7 +16,7 @@ Uso (python3 -I):  espejo.py correr [--escribir] [--solo MOTOR] [--loki RUTA] ·
 """
 import datetime as D, hashlib, importlib.util, json, math, os, re, sys, urllib.error, urllib.request, collections
 
-VERSION = 'espejo 0.2 · 2026-11-28'
+VERSION = 'espejo 0.3 · 2026-11-28'
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PROYECTO = 'dvmdwmytlqubllchkeii'
 API = f'https://api.supabase.com/v1/projects/{PROYECTO}/database/query'
@@ -73,12 +73,17 @@ def supa(sql, solo_lectura=True):
     hdr = {'Content-Type': 'application/json'}
     if _TOK[0]:
         hdr['Authorization'] = 'Bearer ' + _TOK[0]
-    rq = urllib.request.Request(API, data=body, headers=hdr)
-    try:
-        with urllib.request.urlopen(rq, timeout=120) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f'Supabase {e.code}: {e.read()[:400].decode(errors="replace")}') from None
+    import time
+    for intento in range(6):   # 0.2.1: la API limita pedidos por minuto (429): espera y reintenta, sin repetir escrituras a medias
+        rq = urllib.request.Request(API, data=body, headers=hdr)
+        try:
+            with urllib.request.urlopen(rq, timeout=120) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and intento < 5:
+                time.sleep(5 * (intento + 1))
+                continue
+            raise RuntimeError(f'Supabase {e.code}: {e.read()[:400].decode(errors="replace")}') from None
 
 
 def lit(s):
@@ -122,7 +127,7 @@ def sql_publicar(tabla, filas, cols_destino, motor, version, hoy, pk=None):
         datos.append(g)
     js = json.dumps(datos, ensure_ascii=False, default=str)
     h = hashlib.sha256(js.encode()).hexdigest()[:16]
-    det = json.dumps({'via': 'token de cuenta (provisorio, hasta el rol loki)', 'origen': 'Turso horizon-nicom90', 'espejo': VERSION},
+    det = json.dumps({'via': 'rol loki (SET LOCAL ROLE, permisos nota bl)', 'origen': 'Turso horizon-nicom90', 'espejo': VERSION},
                      ensure_ascii=False)
     if pk:   # 0.2: por clave; las columnas que no vienen de Turso (las agregó otro) no se tocan
         cols = sorted({k for g in datos for k in g})
@@ -135,7 +140,7 @@ def sql_publicar(tabla, filas, cols_destino, motor, version, hoy, pk=None):
     else:
         cuerpo = (f"DELETE FROM {tabla}; "
                   f"INSERT INTO {tabla} SELECT * FROM json_populate_recordset(NULL::{tabla}, {lit(js)}::json); ")
-    return h, (f"BEGIN; {cuerpo}"
+    return h, (f"BEGIN; SET LOCAL ROLE loki; {cuerpo}"
                f"INSERT INTO control.registro(cuando, agente, tabla, operacion, motor, version, hash_entrada, filas, detalle) "
                f"VALUES (now(), 'loki', '{tabla}', 'carga', '{motor}', {lit(version)}, '{h}', {len(datos)}, {lit(det)}::jsonb); COMMIT;")
 
@@ -256,6 +261,7 @@ def autotest():
     casos = []
     h, sql = sql_publicar('motores.portada', [{'puesto': 1, 'empresa': "O'Brien $$x$$", 'cuit': '30-71449817-3', 'ajena': 1}],
                           ['puesto', 'empresa', 'cuit', 'cuit11', 'dueno', 'mudado', 'foto'], 'portada', 'portada 0.1', '2026-11-28')
+    casos.append(('escribe como rol loki (la base impone los permisos)', 'SET LOCAL ROLE loki;' in sql))
     casos.append(('una sola transacción', sql.startswith('BEGIN;') and sql.rstrip().endswith('COMMIT;') and sql.count('DELETE') == 1))
     casos.append(('columna que no existe en Supabase no se manda', '"ajena"' not in sql))
     casos.append(('cuit11 calculado', '"cuit11": "30714498173"' in sql))

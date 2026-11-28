@@ -5,6 +5,7 @@ Solo lee (cada consulta va con read_only). Proyecto dvmdwmytlqubllchkeii, API de
 el proxy del entorno; en la PC sale del Administrador de credenciales («Loki/Supabase-horizon»), igual que espejo.py.
 
 Uso (python3 -I):
+  loki_supa.py aldia               ponerse al día en una consulta: apertura + continuidad + bitácora + pendientes + cargas
   loki_supa.py apertura            la apertura del día desde la vista apertura.hoy (la arma el PM; reglas de apertura_corta 0.2)
   loki_supa.py fuentes             fecha de cada fuente y estado del mapa de la mudanza
   loki_supa.py cliente CUIT|texto  todo lo de una cuenta: oportunidad, cotizaciones, muestras, recompra, puntaje (regla 1: todo cuelga del CUIT)
@@ -15,7 +16,7 @@ import json, re, sys
 import importlib.util, os
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-VERSION = '0.1'
+VERSION = '0.2'
 
 
 def _espejo():
@@ -88,6 +89,34 @@ def cliente(c):
             print(f"  RECOMPRA {x['estado']} · foco {x['foco_sku']} · última {dd(x['ultima'])} · próxima {dd(x['proxima'])}")
 
 
+SQL_ALDIA = """SELECT json_build_object(
+ 'apertura', (SELECT apertura FROM apertura.hoy),
+ 'continuidad', (SELECT importante FROM operacion.continuidad WHERE id='actual'),
+ 'bitacora', (SELECT json_agg(x ORDER BY x.id DESC) FROM (SELECT id, fecha, tipo, tema FROM operacion.bitacora ORDER BY id DESC LIMIT 12) x),
+ 'abiertas', (SELECT json_agg(x ORDER BY x.id DESC) FROM (SELECT id, fecha, tema FROM operacion.bitacora b WHERE tipo='pendiente'
+     AND NOT EXISTS (SELECT 1 FROM operacion.bitacora c WHERE c.cierra=b.id) ORDER BY id DESC LIMIT 15) x),
+ 'mapa_no_ok', (SELECT json_agg(tabla||' '||estado) FROM control.mapa WHERE estado NOT IN ('controles','fuente')),
+ 'ultimas_cargas', (SELECT json_agg(x) FROM (SELECT cuando::timestamp(0) cuando, agente, tabla FROM control.registro ORDER BY id DESC LIMIT 5) x),
+ 'auditorias', (SELECT count(*)||' · última '||max(fecha)::text FROM control.auditoria)
+) j"""
+
+
+def aldia():
+    """Ponerse al día en una sola consulta (Regla 0): apertura, continuidad, últimas entradas y pendientes abiertos."""
+    import time
+    t0 = time.time()
+    j = leer(SQL_ALDIA)[0]['j']
+    print(armar_apertura(j['apertura']) if j.get('apertura') else 'apertura.hoy vacía')
+    print('CONTINUIDAD: ' + ' '.join(str(j.get('continuidad') or '').split())[:500])
+    print('BITÁCORA (últimas): ' + ' · '.join(f"#{x['id']} {x['tipo']} {x['tema']}" for x in (j.get('bitacora') or [])[:8]))
+    ab = j.get('abiertas') or []
+    print(f'PENDIENTES ABIERTOS ({len(ab)}): ' + ' · '.join(f"#{x['id']} {x['tema']}" for x in ab[:10]))
+    if j.get('mapa_no_ok'):
+        print('MAPA: ' + ' · '.join(j['mapa_no_ok']))
+    print('ÚLTIMAS CARGAS: ' + ' · '.join(f"{x['cuando'][5:16]} {x['agente'][:10]} {x['tabla']}" for x in (j.get('ultimas_cargas') or [])))
+    print(f"AUDITORÍAS: {j.get('auditorias')} · ({time.time() - t0:.1f} s, una consulta a Supabase)")
+
+
 def autotest():
     a = {'hoy': '2026-11-28', 'proximo_nm': 'NM63', 'controles': ['NM únicos: PASA'], 'vencidas': None,
          'vencen_7d': ['NM54 Net Acebal 01/12'], 'ganadas_sin_entregar': {'n': 1, 'top': ['NM52 Cablenet: falta confirmar entrega']},
@@ -113,7 +142,9 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     if '--autotest' in a:
         sys.exit(autotest())
-    if a[:1] == ['apertura']:
+    if a[:1] == ['aldia']:
+        aldia()
+    elif a[:1] == ['apertura']:
         apertura()
     elif a[:1] == ['fuentes']:
         fuentes()
