@@ -195,6 +195,14 @@
    "test": [
     "--autotest"
    ]
+  },
+  "desde_supabase.py": {
+   "origen": "nuevo 28/11 (Regla 0: puntaje y portada desde el datacenter)",
+   "huella": "37bcd2cfdf6f",
+   "version": "0.1",
+   "test": [
+    "--autotest"
+   ]
   }
  }
 }
