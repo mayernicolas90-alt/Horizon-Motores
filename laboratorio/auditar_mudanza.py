@@ -13,7 +13,11 @@ PARES = [('clientes', 'cuenta', 'cue_cuentas'), ('clientes', 'cuit', 'cue_cuit')
          ('comercial', 'historial', 'crm_historial'), ('comercial', 'cotizacion', 'crm_cotizacion'),
          ('comercial', 'cotizacion_item', 'crm_cotizacion_item'), ('comercial', 'muestra', 'crm_muestra'),
          ('motores', 'recompra_cliente', 'rec_cliente'), ('motores', 'recompra_sku', 'rec_sku'),
-         ('motores', 'puntaje', 'pun_fichas'), ('motores', 'status', 'status_cliente'), ('motores', 'portada', 'por_dia')]
+         ('motores', 'puntaje', 'pun_fichas'), ('motores', 'status', 'status_cliente'), ('motores', 'portada', 'por_dia'),
+         ('operacion', 'bitacora', 'bitacora'), ('operacion', 'tema', 'tema'), ('operacion', 'tema_evento', 'tema_evento'),
+         ('operacion', 'continuidad', 'continuidad'), ('conocimiento', 'regla', 'k_regla'), ('conocimiento', 'decision', 'k_decision'),
+         ('conocimiento', 'preferencia', 'k_preferencia'), ('conocimiento', 'procedimiento', 'k_procedimiento'),
+         ('conocimiento', 'motor', 'k_motor'), ('conocimiento', 'fuente', 'k_fuente'), ('conocimiento', 'documento', 'k_documento')]
 
 
 def turso(sql):
@@ -22,7 +26,12 @@ def turso(sql):
 
 
 def supa(sql):
-    out = subprocess.run([SBQ, sql], capture_output=True, text=True, check=True).stdout.rsplit('\n', 2)
+    import time
+    for i in range(6):   # la API de administración limita pedidos por minuto (429): espera y reintenta
+        out = subprocess.run([SBQ, sql], capture_output=True, text=True, check=True).stdout.rsplit('\n', 2)
+        if out[-2].strip() != '429':
+            break
+        time.sleep(10 * (i + 1))
     if out[-2].strip() not in ('200', '201'):
         raise RuntimeError(f'Supabase {out[-2]}: {out[0][:300]}')
     return json.loads(out[0])
