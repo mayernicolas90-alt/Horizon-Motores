@@ -2,6 +2,8 @@
 """loki_supa.py 0.3 · 28/11/2026 · Loki opera leyendo Supabase (Nicolás 28/11: «empezá a operar de Supabase»).
 0.3: `apertura` trae todo en UNA consulta y sin recortes (fuentes con fecha, listas completas, acción del top 5,
      continuidad y reglas duras): el arranque es una sola llamada (Nicolás 28/11 «arranque lento» → «hacé el 1»).
+0.3.1: la continuidad sale de operacion.continuidad id='actual' entera (la vista apertura.continuidad elige al azar entre
+     filas del mismo día y corta a 600 caracteres; Nicolás 28/11 «hacelo»).
 
 Solo lee (cada consulta va con read_only). Proyecto dvmdwmytlqubllchkeii, API de administración: en la nube el token lo pone
 el proxy del entorno; en la PC sale del Administrador de credenciales («Loki/Supabase-horizon»), igual que espejo.py.
@@ -19,7 +21,7 @@ import json, re, sys
 import importlib.util, os
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-VERSION = '0.3'
+VERSION = '0.3.1'
 
 
 def _espejo():
@@ -77,7 +79,7 @@ SQL_APERTURA = """SELECT json_build_object(
  'semana', (SELECT json_agg(x ORDER BY x.fecha, x.empresa) FROM (SELECT fecha, empresa, proxima_accion FROM apertura.seguimientos_hoy WHERE semana) x),
  'atrasados', (SELECT json_build_object('n', count(*), 'mas_viejos', (SELECT json_agg(x) FROM (SELECT fecha, empresa FROM apertura.seguimientos_hoy
      WHERE NOT semana ORDER BY fecha LIMIT 3) x)) FROM apertura.seguimientos_hoy WHERE NOT semana),
- 'continuidad', (SELECT json_agg(x) FROM (SELECT fecha, texto FROM apertura.continuidad WHERE tipo='continuidad') x),
+ 'continuidad', (SELECT json_agg(x) FROM (SELECT actualizado AS fecha, importante AS texto FROM operacion.continuidad WHERE id='actual') x),
  'bitacora_abierta', (SELECT apertura->'continuidad'->>'bitacora_abierta' FROM apertura.hoy),
  'reglas', (SELECT json_agg(x ORDER BY x.id) FROM (SELECT id, titulo, texto FROM conocimiento.regla WHERE estado='vigente' AND dura=1) x)
 ) j"""

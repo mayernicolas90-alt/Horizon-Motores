@@ -189,9 +189,9 @@
    ]
   },
   "loki_supa.py": {
-   "origen": "nuevo 28/11 (Loki opera leyendo Supabase) · 0.3: apertura entera en una consulta",
-   "huella": "70e567ba0d85",
-   "version": "0.3",
+   "origen": "nuevo 28/11 (Loki opera leyendo Supabase) · 0.3: apertura entera en una consulta · 0.3.1: continuidad de la fila actual",
+   "huella": "ff3d10b4fef9",
+   "version": "0.3.1",
    "test": [
     "--autotest"
    ]
