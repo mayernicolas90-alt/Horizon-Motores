@@ -19,18 +19,19 @@ Solo el orquestador escribe dc_motores y dc_corridas.
 
 Uso (python3 -I):
   dc.py motores                         contratos registrados
-  dc.py correr --disparo finnegans|loki [--forzar] [--solo ID]
+  dc.py correr --disparo finnegans|loki [--forzar] [--solo ID] [--sin-espejo]   (0.9: con PASA publica en Supabase)
   dc.py estado [N]                      últimas corridas
   dc.py --autotest
 """
 import datetime as D, hashlib, importlib.util, json, os, subprocess, sys
 
-VERSION = 'dc 0.8 · 2026-11-25'
+VERSION = 'dc 0.9 · 2026-11-28'
 # 0.8 (25/11, paso 2): con LOKI_CONAUTH (PC) cada motor y el auditor corren a través de conauth.py, que pone el token de Turso.
 PRE = [os.environ['LOKI_CONAUTH']] if os.environ.get('LOKI_CONAUTH') else []
 AQUI = os.path.dirname(os.path.abspath(__file__))
 MOTORES = ['importar.py', 'recompra.py', 'cuentas.py', 'puntaje.py', 'portada.py']   # en orden: un motor solo lee lo que dejaron los anteriores
 AUDITOR = 'auditor_dc.py'
+ESPEJO = 'espejo.py'   # 0.9: publica en Supabase después de una cadena en PASA
 PROPIAS = ('dc_motores', 'dc_corridas')
 # 0.7: tablas que escriben OTROS procesos de Loki mientras corre un motor (la puerta de entrada de reportes, la copia del CRM al abrir,
 # la bitácora): no cuentan para el control de contrato. Caso 24/11 03:33: la puerta de entrada publicó R10/R23/R7 durante la corrida
@@ -111,7 +112,7 @@ def registrar(db, cs):
               c.get('que_hace', ''), ahora()]) for c in cs])
 
 
-def correr(disparo, forzar=False, solo=None, loki_ruta=None):
+def correr(disparo, forzar=False, solo=None, loki_ruta=None, espejo=True):
     L, ruta = loki(loki_ruta)
     db = L.conectar()
     cs = [contrato(a) for a in MOTORES]
@@ -155,6 +156,16 @@ def correr(disparo, forzar=False, solo=None, loki_ruta=None):
     for m, e, d in salida:
         print(f'  {m:10} {e:12} {d}')
     malas = [s for s in salida if s[1].startswith('ERROR') or 'FUERA' in s[1] or 'FALLA' in s[2] or s[1] == 'BLOQUEADO']
+    # 0.9 (28/11, Nicolás: «conectá tus motores a Supabase»): con la cadena en PASA, el Espejo publica en Supabase las salidas
+    # de los motores y las verifica fila por fila. Con FALLA no publica nada. Se saltea en pruebas (base local) o con --sin-espejo.
+    if not malas and espejo and not os.environ.get('LOKI_SQL_LOCAL') and os.path.exists(os.path.join(AQUI, ESPEJO)):
+        e = subprocess.run([sys.executable, '-I', '-X', 'utf8', *PRE, os.path.join(AQUI, ESPEJO), 'correr', '--escribir', '--loki', ruta],
+                           capture_output=True, text=True, cwd=AQUI)
+        print('ESPEJO: ' + ('PASA' if e.returncode == 0 else 'FALLA'))
+        print('\n'.join('  ' + l for l in e.stdout.strip().splitlines()[1:-1] if 'SIN DESTINO' not in l))
+        if e.returncode:
+            print((e.stderr or '')[-300:])
+            malas = [('espejo', 'FALLA', '')]
     print('RESULTADO: ' + ('FALLA' if malas else 'PASA'))
     return 1 if malas else 0
 
@@ -237,7 +248,7 @@ if __name__ == '__main__':
     if a[:1] == ['motores']:
         motores()
     elif a[:1] == ['correr']:
-        sys.exit(correr(arg('--disparo', 'todos'), '--forzar' in a, arg('--solo'), arg('--loki')))
+        sys.exit(correr(arg('--disparo', 'todos'), '--forzar' in a, arg('--solo'), arg('--loki'), '--sin-espejo' not in a))
     elif a[:1] == ['estado']:
         estado(int(a[1]) if len(a) > 1 and a[1].isdigit() else 10, arg('--loki'))
     else:

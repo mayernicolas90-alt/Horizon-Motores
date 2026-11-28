@@ -32,9 +32,41 @@ def contrato_propio():
 
 
 # ------------------------------------------------------------------ Supabase (API de administración)
+CRED_PC = 'Loki/Supabase-horizon'      # Administrador de credenciales de Windows (bitácora #263)
+
+
+def token_pc():
+    """En la PC el token sale del Administrador de credenciales; en la nube lo pone el proxy (devuelve None)."""
+    if os.name != 'nt':
+        return None
+    import ctypes, ctypes.wintypes as W
+
+    class CRED(ctypes.Structure):
+        _fields_ = [('Flags', W.DWORD), ('Type', W.DWORD), ('TargetName', W.LPWSTR), ('Comment', W.LPWSTR),
+                    ('LastWritten', W.FILETIME), ('CredentialBlobSize', W.DWORD), ('CredentialBlob', ctypes.POINTER(ctypes.c_char)),
+                    ('Persist', W.DWORD), ('AttributeCount', W.DWORD), ('Attributes', ctypes.c_void_p),
+                    ('TargetAlias', W.LPWSTR), ('UserName', W.LPWSTR)]
+    adv = ctypes.WinDLL('advapi32', use_last_error=True)
+    p = ctypes.POINTER(CRED)()
+    if not adv.CredReadW(CRED_PC, 1, 0, ctypes.byref(p)):
+        raise SystemExit(f'FALLA: no está la credencial «{CRED_PC}» en el Administrador de credenciales')
+    try:
+        return ctypes.string_at(p.contents.CredentialBlob, p.contents.CredentialBlobSize).decode().strip()
+    finally:
+        adv.CredFree(p)
+
+
+_TOK = []
+
+
 def supa(sql, solo_lectura=True):
     body = json.dumps({'query': sql, 'read_only': solo_lectura}).encode()
-    rq = urllib.request.Request(API, data=body, headers={'Content-Type': 'application/json'})
+    if not _TOK:
+        _TOK.append(token_pc())
+    hdr = {'Content-Type': 'application/json'}
+    if _TOK[0]:
+        hdr['Authorization'] = 'Bearer ' + _TOK[0]
+    rq = urllib.request.Request(API, data=body, headers=hdr)
     with urllib.request.urlopen(rq, timeout=120) as r:
         return json.load(r)
 
