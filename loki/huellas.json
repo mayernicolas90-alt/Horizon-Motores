@@ -77,9 +77,9 @@
    ]
   },
   "dc.py": {
-   "origen": "nuevo 24/11 (datacenter, DEC-1124a/b/c)",
-   "huella": "82bb51187cf6",
-   "version": "0.8",
+   "origen": "nuevo 24/11 · 0.9 28/11: corre el Espejo a Supabase con PASA",
+   "huella": "0fbeae2ad870",
+   "version": "0.9",
    "test": [
     "--autotest"
    ]
@@ -176,6 +176,14 @@
    "origen": "loki/apertura_corta.py (nuevo 27/11)",
    "huella": "18c3908112fe",
    "version": "0.2",
+   "test": [
+    "--autotest"
+   ]
+  },
+  "espejo.py": {
+   "origen": "nuevo 28/11 (Espejo a Supabase, hacelo de Nicolás)",
+   "huella": "34ea6ea95166",
+   "version": "0.1.1",
    "test": [
     "--autotest"
    ]
